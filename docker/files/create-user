@@ -11,7 +11,7 @@ set -euxo pipefail
 if [ -z "$(getent group "${GID}")" ]; then
   groupadd --system --gid "${GID}" "${GROUP}"
 else
-  GROUP_EXISTING=$(getent group "${GID}" | cut -d: -f1)
+  GROUP_EXISTING="$(getent group "${GID}" | cut -d: -f1 || true)"
   if [ "${GROUP_EXISTING}" != "${GROUP}" ]; then
     groupmod --new-name "${GROUP}" "${GROUP_EXISTING}"
   fi
@@ -23,8 +23,8 @@ elif [ -f /etc/redhat-release ]; then
   SUDO_GROUP="wheel"
 fi
 
-USER_EXISTING=$(getent passwd "${UID}" | cut -d: -f1 || true)
-HOME_EXISTING=$(getent passwd "${UID}" | cut -d: -f6 || true)
+USER_EXISTING="$(getent passwd "${UID}" | cut -d: -f1 || true)"
+HOME_EXISTING="$(getent passwd "${UID}" | cut -d: -f6 || true)"
 
 if [ -z "${USER_EXISTING}" ]; then
   useradd \
