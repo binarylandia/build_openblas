@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+
+NAME="openblas"
+GIT_REPO_URL="https://github.com/OpenMathLib/OpenBLAS"
+VERSION="0.3.28"
+BRANCH="v${VERSION}"
+
+BUILD_DIR=".build"
+INSTALL_DIR="/opt/${NAME}"
+OUT_DIR=".out"
+
+NICE="nice -19 ionice -c2 -n5"
+JOBS="${JOBS:=$(($(nproc --all) + 2))}"
+
+build_time="$(date '+%Y%m%d%H%M%S')"
+
+function abspath() {
+  readlink -m "$1"
+}
+
+function log() {
+  tee -a "${1}" | stdbuf -oL grep --color=always -iE "error|fail|cannot|can't|unable|"
+}
+
+function write_version() {
+  filepath="${1}"
+
+  cat > "$filepath" << EOF
+${GIT_REPO_URL}
+${VERSION}
+$(git rev-parse HEAD)
+$(git describe --always --dirty)
+$(git describe --always --dirty --tags)
+$(git describe --always --dirty --tags --all)
+${build_time}
+EOF
+}
+
+build_dir="$(abspath ${BUILD_DIR})"
+mkdir -p "${build_dir}"
+outdir="$(abspath "${OUT_DIR}")"
+mkdir -p "${outdir}"
+
+pushd "$build_dir" >/dev/null
+  src_dir="${NAME}-${VERSION}"
+
+  if [ ! -d "${src_dir}" ]; then
+    git clone --recursive --depth=100 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}"
+  fi
+
+  pushd "${src_dir}" >/dev/null
+    TOOLCHAIN_FILE="/usr/toolchain-x86_64-unknown-linux-musl.cmake"
+
+    mkdir -p "cmake-build"
+    pushd "cmake-build"
+
+      ${NICE} cmake .. \
+        -LAH -Wno-dev -Wno-deprecated \
+        -DCMAKE_VERBOSE_MAKEFILE="ON" \
+        -DCMAKE_BUILD_TYPE="Release" \
+        -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
+        -DTARGET="HASWELL" \
+        -DBUILD_SHARED="OFF" \
+        -DBUILD_STATIC="OFF" \
+        -DBUILD_STATIC_LIBS="ON" \
+        -DBUILD_TESTING="OFF" \
+        -DBUILD_WITHOUT_CBLAS="OFF" \
+        -DBUILD_WITHOUT_LAPACK="OFF" \
+        -DDYNAMIC_ARCH="ON" \
+        -DFIXED_LIBNAME="ON" \
+        -DNO_AFFINITY="ON" \
+        -DNO_WARMUP="ON" \
+        -DUSE_OPENMP="OFF" \
+        ${TOOLCHAIN_FILE:+-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"} \
+        2>&1 | log "build.log"
+
+      ${NICE} cmake --build . --parallel="${JOBS}" 2>&1 | log "build.log"
+
+      ${NICE} cmake --install . 2>&1 | log "build.log"
+
+      write_version "${INSTALL_DIR}/version.txt"
+      cp "build.log" "${INSTALL_DIR}/"
+
+    popd >/dev/null
+
+    tar -cf - -C "${INSTALL_DIR}" . | xz -T0 -9 > "${outdir}/${NAME}-${VERSION}-static-${build_time}.tar.xz"
+  popd >/dev/null
+popd >/dev/null
+
+
+#      ${NICE} make -j"$(nproc)" 2>&1 | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
+#      ${NICE} make install 2>&1 | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
+
+
+
+#    cmake -LAH . 2>&1 || true | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
+
+#        -DCMAKE_C_COMPILER=gcc \
+#        -DCMAKE_CXX_COMPILER=g++ \
+#        -DCMAKE_Fortran_COMPILER=gfortran \
+#        -DCMAKE_C_FLAGS="-w -fPIC --static -static -Bstatic ${CFLAGS:+:CFLAGS}" \
+#        -DCMAKE_CXX_FLAGS="-w -fPIC --static -static -Bstatic ${CXXFLAGS:+:CXXFLAGS}" \
+#        -DCMAKE_Fortran_FLAGS="-w -fPIC --static -static -Bstatic ${FCLAGS:+:FCLAGS}" \
+#        -DCMAKE_EXE_LINKER_FLAGS="-w -static -static-libgcc ${LDFLAGS:+:LDFLAGS}" \
+
+#          -DBINARY=64 \
+#          -DBUILD_SHARED_LIBS=0 \
+#          -DBUILD_TESTS=0 \
+#          -DCONSISTENT_FPCSR=1 \
+#          -DDYNAMIC_ARCH=1 \
+#          -DINTERFACE64=1 \
+#          -DNOFORTRAN=0 \
+#          -DNO_AVX2=0 \
+#          -DNO_AVX512=0 \
+#          -DNO_AVX=0 \
+#          -DNO_LAPACK=0 \
+#          -DNUM_THREADS=8 \
+#          -DUSE_LOCKING=0 \
+#          -DUSE_OPENMP=0 \
+#          -DUSE_THREAD=1 \
+#        -DCROSS=1 \
+#        -DNUM_PARALLEL="1" \
+#        -DNUM_THREADS="8" \
