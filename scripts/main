@@ -24,6 +24,15 @@ function log() {
   tee -a "${1}" | stdbuf -oL grep --color=always -iE "error|fail|cannot|can't|unable|"
 }
 
+function package() {
+  local input_dir="${1}"
+  local output_tarball="${2}"
+
+  ${NICE} find "${input_dir}" -printf "%P\n" \
+    | ${NICE} tar --no-recursion -cf - -C "${input_dir}" --files-from=- \
+    | ${NICE} xz -T0 -k > "${output_tarball}"
+}
+
 function write_version() {
   filepath="${1}"
 
@@ -85,7 +94,7 @@ pushd "$build_dir" >/dev/null
 
     popd >/dev/null
 
-    tar -cf - -C "${INSTALL_DIR}" . | xz -T0 -9 > "${outdir}/${NAME}-${VERSION}-static-${build_time}.tar.xz"
+    package "${INSTALL_DIR}" "${outdir}/${NAME}-${VERSION}-static-${build_time}.tar.xz"
   popd >/dev/null
 popd >/dev/null
 
