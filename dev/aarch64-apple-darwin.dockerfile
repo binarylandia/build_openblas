@@ -27,14 +27,6 @@ RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${OSX_CROSS_PATH}" \
 && curl -fsSL "https://github.com/binarylandia/build_osxcross/releases/download/2024-11-02_07-09-30/osxcross-202411020701-b49804a-20241102070930-2024-11-02_07-09-30.tar.xz" | tar -C "${OSX_CROSS_PATH}" -xJ
 
-
-COPY ./docker/files /
-RUN set -euxo pipefail >/dev/null \
-&& chmod +x /usr/bin/pkgutil
-
-
-ENV HOSTCC="gcc"
-
 ENV OSXCROSS_MP_INC="1"
 ENV MACOSX_DEPLOYMENT_TARGET="10.12"
 ENV OSX_TRIPLET="aarch64-apple-darwin20.2"
