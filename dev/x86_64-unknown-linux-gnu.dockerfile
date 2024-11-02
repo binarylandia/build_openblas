@@ -18,7 +18,6 @@ RUN set -euxo pipefail >/dev/null \
   ca-certificates \
   curl \
   git \
-  glibc-static \
   make \
   parallel \
   sudo \
@@ -43,6 +42,34 @@ RUN set -euxo pipefail >/dev/null \
 && ls /usr/bin/gcc-ar \
 && gcc-ar --version
 
+ENV TRIPLET="x86_64-unknown-linux-gnu"
+ENV GCC_DIR="/opt/gcc"
+RUN set -euxo pipefail >/dev/null \
+&& mkdir -p "${GCC_DIR}" \
+&& curl -fsSL "https://github.com/binarylandia/build_crosstool-ng/releases/download/2024-10-30_09-44-58/gcc-9.5.0-${TRIPLET}-2024-10-30_09-44-58.tar.xz" | tar -C "${GCC_DIR}" -xJ \
+&& ls ${GCC_DIR}/bin/${TRIPLET}-gcc \
+&& ${GCC_DIR}/bin/${TRIPLET}-gcc -v \
+&& ls ${GCC_DIR}/bin/${TRIPLET}-gcc-ar \
+&& ${GCC_DIR}/bin/${TRIPLET}-gcc-ar --version
+
+ENV CC="${GCC_DIR}/bin/${TRIPLET}-cc"
+ENV CXX="${GCC_DIR}/bin/${TRIPLET}-g++"
+ENV FC="${GCC_DIR}/bin/${TRIPLET}-gfortran"
+ENV ADDR2LINE="${GCC_DIR}/bin/${TRIPLET}-addr2line"
+ENV AR="${GCC_DIR}/bin/${TRIPLET}-gcc-ar"
+ENV AS="${GCC_DIR}/bin/${TRIPLET}-as"
+ENV CPP="${GCC_DIR}/bin/${TRIPLET}-cpp"
+ENV ELFEDIT="${GCC_DIR}/bin/${TRIPLET}-elfedit"
+ENV LD="${GCC_DIR}/bin/${TRIPLET}-ld"
+ENV LDD="${GCC_DIR}/bin/${TRIPLET}-ldd"
+ENV NM="${GCC_DIR}/bin/${TRIPLET}-gcc-nm"
+ENV OBJCOPY="${GCC_DIR}/bin/${TRIPLET}-objcopy"
+ENV OBJDUMP="${GCC_DIR}/bin/${TRIPLET}-objdump"
+ENV RANLIB="${GCC_DIR}/bin/${TRIPLET}-gcc-ranlib"
+ENV READELF="${GCC_DIR}/bin/${TRIPLET}-readelf"
+ENV SIZE="${GCC_DIR}/bin/${TRIPLET}-size"
+ENV STRINGS="${GCC_DIR}/bin/${TRIPLET}-strings"
+ENV STRIP="${GCC_DIR}/bin/${TRIPLET}-strip"
 
 ENV OPENBLAS_BINARY="64"
 ENV OPENBLAS_CROSS="1"
