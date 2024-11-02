@@ -42,7 +42,7 @@ RUN set -euxo pipefail >/dev/null \
 && ls /usr/bin/gcc-ar \
 && gcc-ar --version
 
-ENV TRIPLET="aarch64-unknown-linux-gnu"
+ENV TRIPLET="aarch64-unknown-linux-musl"
 ENV GCC_DIR="/opt/gcc"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \

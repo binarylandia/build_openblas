@@ -42,7 +42,7 @@ RUN set -euxo pipefail >/dev/null \
 && ls /usr/bin/gcc-ar \
 && gcc-ar --version
 
-ENV TRIPLET="aarch64-unknown-linux-gnu"
+ENV TRIPLET="x86_64-unknown-linux-musl"
 ENV GCC_DIR="/opt/gcc"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \
@@ -74,7 +74,7 @@ ENV STRIP="${GCC_DIR}/bin/${TRIPLET}-strip"
 ENV OPENBLAS_BINARY="64"
 ENV OPENBLAS_CROSS="1"
 ENV OPENBLAS_HOSTCC="/usr/bin/gcc"
-ENV OPENBLAS_TARGET="ARMV8"
+ENV OPENBLAS_TARGET="HASWELL"
 
 
 ARG USER=user
