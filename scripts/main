@@ -89,8 +89,15 @@ pushd "$build_dir" >/dev/null
     export DYNAMIC_ARCH="1"
     export FIXED_LIBNAME="1"
 
-    export NO_SHARED=1
-    export NO_STATIC=0
+    export NO_SHARED="1"
+    export NO_STATIC="0"
+
+   if [[ "${CROSS_TARGET}" == *windows* ]]; then
+      export CONSISTENT_FPCSR="1"
+      export CC="${CC} -Bstatic"
+      export CXX="${CXX} -Bstatic -static -static-libstdc++"
+      export FC="${FC} -Bstatic -static-libgfortran"
+    fi
 
     ${NICE} make -j"${JOBS}" 2>&1 | log "build.log"
 
