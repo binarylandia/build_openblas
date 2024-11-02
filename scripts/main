@@ -33,19 +33,6 @@ function package() {
     | ${NICE} xz -T0 -k > "${output_tarball}"
 }
 
-function write_version() {
-  filepath="${1}"
-
-  cat > "$filepath" << EOF
-${GIT_REPO_URL}
-${VERSION}
-$(git rev-parse HEAD)
-$(git describe --always --dirty)
-$(git describe --always --dirty --tags)
-$(git describe --always --dirty --tags --all)
-${build_time}
-EOF
-}
 
 build_dir="$(abspath ${BUILD_DIR})"
 mkdir -p "${build_dir}"
@@ -56,43 +43,27 @@ pushd "$build_dir" >/dev/null
   src_dir="${NAME}-${VERSION}"
 
   if [ ! -d "${src_dir}" ]; then
-    git clone --recursive --depth=100 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}"
+    git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}"
   fi
 
   pushd "${src_dir}" >/dev/null
-    TOOLCHAIN_FILE="/usr/toolchain-x86_64-unknown-linux-musl.cmake"
 
-    mkdir -p "cmake-build"
-    pushd "cmake-build"
+    export CROSS="1"
+    export BINARY="64"
+    export TARGET="HASWELL"
+    export DYNAMIC_ARCH="1"
+    export FIXED_LIBNAME="1"
+    export CC="/opt/osxcross/bin/x86_64-apple-darwin20.2-gcc"
+    export FC="/opt/osxcross/bin/x86_64-apple-darwin20.2-gfortran"
+    export LD="/opt/osxcross/bin/x86_64-apple-darwin20.2-ld"
+    export HOSTCC="clang"
 
-      ${NICE} cmake .. \
-        -LAH -Wno-dev -Wno-deprecated \
-        -DCMAKE_VERBOSE_MAKEFILE="ON" \
-        -DCMAKE_BUILD_TYPE="Release" \
-        -DCMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
-        -DTARGET="HASWELL" \
-        -DBUILD_SHARED="OFF" \
-        -DBUILD_STATIC="OFF" \
-        -DBUILD_STATIC_LIBS="ON" \
-        -DBUILD_TESTING="OFF" \
-        -DBUILD_WITHOUT_CBLAS="OFF" \
-        -DBUILD_WITHOUT_LAPACK="OFF" \
-        -DDYNAMIC_ARCH="ON" \
-        -DFIXED_LIBNAME="ON" \
-        -DNO_AFFINITY="ON" \
-        -DNO_WARMUP="ON" \
-        -DUSE_OPENMP="OFF" \
-        ${TOOLCHAIN_FILE:+-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"} \
-        2>&1 | log "build.log"
+    export BUILD_SHARED_LIBS=0
+    export BUILD_TESTS=0
 
-      ${NICE} cmake --build . --parallel="${JOBS}" 2>&1 | log "build.log"
+    ${NICE} make -j"${JOBS}" 2>&1 | log "build.log"
 
-      ${NICE} cmake --install . 2>&1 | log "build.log"
-
-      write_version "${INSTALL_DIR}/version.txt"
-      cp "build.log" "${INSTALL_DIR}/"
-
-    popd >/dev/null
+    ${NICE} make install PREFIX="${INSTALL_DIR}" 2>&1 | log "build.log"
 
     package "${INSTALL_DIR}" "${outdir}/${NAME}-${VERSION}-static-${build_time}.tar.xz"
   popd >/dev/null
