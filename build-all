@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+# Runs bulk cross-compilation for all supported platforms
+
+set -euo pipefail
+
+function abspath() {
+  readlink -m "$1"
+}
+
+targets=(
+  "aarch64-apple-darwin"
+  "aarch64-unknown-linux-gnu"
+  "aarch64-unknown-linux-musl"
+  "x86_64-apple-darwin"
+  "x86_64-pc-windows-gnu"
+  "x86_64-unknown-linux-gnu"
+  "x86_64-unknown-linux-musl"
+)
+
+function run_one() {
+  target=${1:?}
+  printf "\nBuilding for %s\n" "${target}"
+  script -q /dev/null -c "CROSS_TARGET=${target} ./build" || cat ".cache/results/${target}"
+}
+export -f run_one
+
+parallel --line-buffer --tag --tagstring '|{#}| \033[34m{= sprintf("%-26s", $_) =}\033[0m' --jobs="${#targets[@]}" run_one ::: "${targets[@]}"
