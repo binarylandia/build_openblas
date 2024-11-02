@@ -70,6 +70,7 @@ function package() {
 
 
 build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}"
+install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}"
 outdir="$(abspath "${OUT_DIR}")"
 mkdir -p "${build_dir}" "${outdir}"
 
@@ -101,9 +102,9 @@ pushd "$build_dir" >/dev/null
 
     ${NICE} make -j"${JOBS}" 2>&1 | log "build.log"
 
-    ${NICE} make install PREFIX="${INSTALL_DIR}" 2>&1 | log "build.log"
+    ${NICE} make install PREFIX="${install_dir}" 2>&1 | log "build.log"
 
-    package "${INSTALL_DIR}" "${outdir}/${NAME}-${VERSION}-static-${CROSS_TARGET}-${build_time}.tar.xz"
+    package "${install_dir}" "${outdir}/${NAME}-${VERSION}-static-${CROSS_TARGET}-${build_time}.tar.xz"
   popd >/dev/null
 popd >/dev/null
 
