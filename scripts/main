@@ -49,7 +49,7 @@ export INSTALL_DIR="/opt/${NAME}"
 export NICE="nice -19 ionice -c2 -n5"
 export JOBS="${JOBS:=$(($(nproc --all) + 2))}"
 
-export build_time="$(date -u '+%Y-%m-%d_%H-%M-%S')"
+export build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 
 function abspath() {
   readlink -m "$1"

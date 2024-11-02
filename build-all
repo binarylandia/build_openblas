@@ -18,10 +18,12 @@ targets=(
   "x86_64-unknown-linux-musl"
 )
 
+export BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')"
+
 function run_one() {
   target=${1:?}
   printf "\nBuilding for %s\n" "${target}"
-  script -q /dev/null -c "CROSS_TARGET=${target} ./build" || cat ".cache/results/${target}"
+  script -q /dev/null -c "CROSS_TARGET=${target} BUILD_TIME=${BUILD_TIME} ./build" || cat ".cache/results/${target}"
 }
 export -f run_one
 

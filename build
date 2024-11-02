@@ -38,6 +38,7 @@ docker run -it --rm \
   --volume="$(pwd)/.cache/ccache:/cache/ccache" \
   --workdir="/workdir" \
   --env="CROSS_TARGET=${CROSS_TARGET}" \
+  --env="BUILD_TIME=${BUILD_TIME}" \
   --env="UID=$(id -u)" \
   --env="GID=$(id -g)" \
   --env="USER=${USER}" \
