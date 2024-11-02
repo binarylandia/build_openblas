@@ -25,7 +25,7 @@ RUN set -euxo pipefail >/dev/null \
 ENV OSX_CROSS_PATH="/opt/osxcross"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${OSX_CROSS_PATH}" \
-&& curl -fsSL "https://github.com/binarylandia/build_osxcross/releases/download/osxcross-202410290447-62e500b-20241101155612-2024-11-01_15-56-10/osxcross-202410290447-62e500b-20241101155612-2024-11-01_15-56-10.tar.xz" | tar -C "${OSX_CROSS_PATH}" -xJ
+&& curl -fsSL "https://github.com/binarylandia/build_osxcross/releases/download/2024-11-02_07-09-30/osxcross-202411020701-b49804a-20241102070930-2024-11-02_07-09-30.tar.xz" | tar -C "${OSX_CROSS_PATH}" -xJ
 
 
 COPY ./docker/files /
@@ -57,10 +57,10 @@ ENV PKG_CONFIG="${OSX_CROSS_PATH}/bin/${OSX_TRIPLET}-pkg-config"
 ENV RANLIB="${OSX_CROSS_PATH}/bin/${OSX_TRIPLET}-ranlib"
 ENV STRIP="${OSX_CROSS_PATH}/bin/${OSX_TRIPLET}-strip"
 
-ENV OPENBLAS_CROSS="1"
 ENV OPENBLAS_BINARY="64"
-ENV OPENBLAS_TARGET="ARMV8"
+ENV OPENBLAS_CROSS="1"
 ENV OPENBLAS_HOSTCC="clang"
+ENV OPENBLAS_TARGET="ARMV8"
 
 
 
