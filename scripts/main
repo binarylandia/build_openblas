@@ -8,8 +8,8 @@ export GIT_REPO_URL="https://github.com/OpenMathLib/OpenBLAS"
 export VERSION="0.3.28"
 export BRANCH="v${VERSION}"
 
-export CFLAGS="-w -g0 -Os ${CFLAGS:-}"
-export CXXFLAGS="-w -g0 -Os ${CXXFLAGS:-}"
+export CFLAGS="-w ${CFLAGS:-}"
+export CXXFLAGS="-w ${CXXFLAGS:-}"
 export LDFLAGS="-s ${LDFLAGS:-}"
 
 export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
@@ -37,8 +37,9 @@ export LDFLAGS="-fPIC ${LDFLAGS:-}"
 export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
 export CCACHE_MAXSIZE="50G"
-export CC="ccache ${CC}"
-export CXX="ccache ${CXX}"
+export CC="ccache ${CC:-gcc}"
+export CXX="ccache ${CXX:-g++}"
+export FC="${FC:-gfortran}"
 
 export NAME="openblas"
 export BUILD_DIR=".build"
@@ -80,11 +81,6 @@ pushd "$build_dir" >/dev/null
   fi
 
   pushd "${src_dir}" >/dev/null
-
-#    export CC="/opt/osxcross/bin/x86_64-apple-darwin20.2-gcc"
-#    export FC="/opt/osxcross/bin/x86_64-apple-darwin20.2-gfortran"
-#    export LD="/opt/osxcross/bin/x86_64-apple-darwin20.2-ld"
-
     export BINARY="${OPENBLAS_BINARY:-}"
     export TARGET="${OPENBLAS_TARGET:-}"
     export HOSTCC="${OPENBLAS_HOSTCC:-}"
