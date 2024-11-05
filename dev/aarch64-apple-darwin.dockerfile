@@ -43,14 +43,14 @@ RUN set -euxo pipefail >/dev/null \
 && cmake --version
 
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/binarylandia/build_gcc/releases/download/2024-11-01_15-42-39/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-01_15-42-39.tar.xz" | tar -C "/usr" -xJ \
+&& curl -fsSL "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" | tar -C "/usr" -xJ \
 && ls /usr/bin/gcc \
 && gcc -v \
 && ls /usr/bin/gcc-ar \
 && gcc-ar --version
 
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/binarylandia/build_llvm/releases/download/llvm-18.1.8-2024-11-02_06-08-31/llvm-18.1.8-2024-11-02_06-08-31.tar.xz" | tar -C "/usr" -xJ \
+&& curl -fsSL "https://github.com/binarylandia/build_llvm/releases/download/llvm-19.1.3-2024-11-03_15-15-54/llvm-19.1.3-2024-11-03_15-15-54.tar.xz" | tar -C "/usr" -xJ \
 && ls /usr/bin/clang \
 && clang -v
 

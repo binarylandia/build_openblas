@@ -36,7 +36,7 @@ RUN set -euxo pipefail >/dev/null \
 && ccache --version
 
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/binarylandia/build_gcc/releases/download/2024-11-01_15-42-39/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-01_15-42-39.tar.xz" | tar -C "/usr" -xJ \
+&& curl -fsSL "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" | tar -C "/usr" -xJ \
 && ls /usr/bin/gcc \
 && gcc -v \
 && ls /usr/bin/gcc-ar \
