@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import sys
+
+
+def find_architectures_after(lines, intel, amd, excludes):
+    mode = None
+    intel_found = False
+    amd_found = False
+    archs = []
+
+    for line in lines:
+        line = line.strip()
+
+        # Check for mode switches
+        if "Intel CPU:" in line:
+            mode = "intel"
+            continue
+        elif "AMD CPU:" in line:
+            mode = "amd"
+            continue
+        elif line.endswith("CPU:") or not line:
+            mode = None
+
+        if mode == "intel":
+            if intel_found or line == intel:
+                intel_found = True
+                archs.append(line)
+        elif mode == "amd":
+            if amd_found or line == amd:
+                amd_found = True
+                archs.append(line)
+
+    for exclude in excludes:
+        archs.remove(exclude)
+
+    return archs
+
+
+def main():
+    lines = sys.stdin.read().splitlines()
+    archs = find_architectures_after(
+        lines, intel="HASWELL", amd="BULLDOZER", excludes=["ATOM"]
+    )
+    print(" ".join(archs))
+
+
+if __name__ == "__main__":
+    main()

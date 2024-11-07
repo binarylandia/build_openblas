@@ -98,11 +98,21 @@ pushd "$build_dir" >/dev/null
     export NUM_THREADS="1"
     export USE_THREAD="0"
 
-    if [[ "${CROSS_TARGET}" == *windows* ]]; then
+    if [[ "${CROSS_TARGET}" == x86_64* ]]; then
+      DYNAMIC_LIST="$(../../../scripts/get_x86_archs < "$build_dir/${src_dir}/TargetList.txt")"
+      export DYNAMIC_LIST
+    fi
+
+    if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
       export CONSISTENT_FPCSR="1"
       export CC="${CC} -Bstatic"
       export CXX="${CXX} -Bstatic -static -static-libstdc++"
       export FC="${FC} -Bstatic -static-libgfortran"
+    elif [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+      apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+      export CFLAGS="${apple_common} ${CFLAGS:-}"
+      export CXXFLAGS="${apple_common} ${CXXFLAGS:-}"
+      export LDFLAGS="${apple_common} ${LDFLAGS:-}"
     fi
 
     ${NICE} make -j"${JOBS}" 2>&1 | log "build.log"
