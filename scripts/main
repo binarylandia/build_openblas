@@ -10,10 +10,12 @@ export BRANCH="v${VERSION}"
 
 export CFLAGS="-w ${CFLAGS:-}"
 export CXXFLAGS="-w ${CXXFLAGS:-}"
+export FFLAGS="-w ${FFLAGS:-}"
 export LDFLAGS="-s ${LDFLAGS:-}"
 
 export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
 export CXXFLAGS="-static-libgcc -static-libstdc++ ${CXXFLAGS:-}"
+export FFLAGS="-static-libgcc -static-libgfortran ${FFLAGS:-}"
 export LDFLAGS="-static-libgcc -static-libstdc++ ${LDFLAGS:-}"
 
 #export CFLAGS="-static --static ${CFLAGS:-}"
@@ -22,6 +24,7 @@ export LDFLAGS="-static-libgcc -static-libstdc++ ${LDFLAGS:-}"
 
 export CFLAGS="-fPIC ${CFLAGS:-}"
 export CXXFLAGS="-fPIC ${CXXFLAGS:-}"
+export FFLAGS="-fPIC ${FFLAGS:-}"
 export LDFLAGS="-fPIC ${LDFLAGS:-}"
 
 #export CFLAGS="-pie -fPIE ${CFLAGS:-}"
@@ -30,9 +33,9 @@ export LDFLAGS="-fPIC ${LDFLAGS:-}"
 
 #export CC="${CC:-gcc}"
 #export CXX="${CXX:-g++}"
-#export AR="${AR:-gcc-ar}"
-#export NM="${NM:-gcc-nm}"
-#export RANLIB="${RANLIB:-gcc-ranlib}"
+export AR="${AR:-gcc-ar}"
+export NM="${NM:-gcc-nm}"
+export RANLIB="${RANLIB:-gcc-ranlib}"
 
 export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
@@ -47,7 +50,7 @@ export OUT_DIR=".out"
 export INSTALL_DIR="/opt/${NAME}"
 
 export NICE="nice -19 ionice -c2 -n5"
-export JOBS="${JOBS:=$(($(nproc --all) + 2))}"
+#export JOBS="${JOBS:=$(($(nproc --all) + 2))}"
 
 export build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 
@@ -62,27 +65,45 @@ function log() {
 function package() {
   local input_dir="${1}"
   local output_tarball="${2}"
-
-  ${NICE} find "${input_dir}" -printf "%P\n" \
-    | ${NICE} tar --no-recursion -cf - -C "${input_dir}" --files-from=- \
-    | ${NICE} xz -T0 -k > "${output_tarball}"
+  mkdir -p "$(dirname "${output_tarball}")"
+  ${NICE} find "${input_dir}" -printf "%P\n" |
+    ${NICE} tar --no-recursion -cf - -C "${input_dir}" --files-from=- |
+    ${NICE} xz -T0 -k >"${output_tarball}"
 }
 
+# For explanation of build variables, see
+# https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
+flavor=""
+if ((WITH_THREADS > 1)); then
+  export USE_THREAD="1"
+  export NUM_THREADS="${WITH_THREADS:-1}"
+  export USE_LOCKING="1"
+  flavor="-threads"
+else
+  export USE_THREAD="0"
+  export NUM_THREADS="1"
+  export USE_LOCKING="1"
+fi
 
-build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}"
-install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}"
-outdir="$(abspath "${OUT_DIR}")"
-mkdir -p "${build_dir}" "${outdir}"
+build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}${flavor}"
+install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}${flavor}"
+outdir="$(abspath "${OUT_DIR}")/${build_time}"
+mkdir -p "${build_dir}" "${install_dir}" "${outdir}"
 
 pushd "$build_dir" >/dev/null
+{
   src_dir="${NAME}-${VERSION}"
 
   if [ ! -d "${src_dir}" ]; then
+    git config --global advice.detachedHead false
     git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}"
   fi
 
   pushd "${src_dir}" >/dev/null
-    export BINARY="${OPENBLAS_BINARY:-}"
+  {
+    # For explanation of build variables, see
+    # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
+    export BINARY="64"
     export TARGET="${OPENBLAS_TARGET:-}"
     export HOSTCC="${OPENBLAS_HOSTCC:-}"
 
@@ -90,70 +111,35 @@ pushd "$build_dir" >/dev/null
     export DYNAMIC_ARCH="1"
     export FIXED_LIBNAME="1"
 
+    export BUILD_SHARED="0"
+    export BUILD_STATIC="1"
     export NO_SHARED="1"
     export NO_STATIC="0"
-    export NO_BINARY_MODE="1"
 
     export USE_OPENMP="0"
-    export NUM_THREADS="1"
-    export USE_THREAD="0"
+    export NUM_PARALLEL="1"
 
     if [[ "${CROSS_TARGET}" == x86_64* ]]; then
-      DYNAMIC_LIST="$(../../../scripts/get_x86_archs < "$build_dir/${src_dir}/TargetList.txt")"
+      DYNAMIC_LIST="$(../../../scripts/get_x86_archs <"$build_dir/${src_dir}/TargetList.txt")"
       export DYNAMIC_LIST
     fi
 
     if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
       export CONSISTENT_FPCSR="1"
-      export CC="${CC} -Bstatic"
-      export CXX="${CXX} -Bstatic -static -static-libstdc++"
-      export FC="${FC} -Bstatic -static-libgfortran"
     elif [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
       apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
       export CFLAGS="${apple_common} ${CFLAGS:-}"
       export CXXFLAGS="${apple_common} ${CXXFLAGS:-}"
+      export FFLAGS="${apple_common} ${FFLAGS:-}"
       export LDFLAGS="${apple_common} ${LDFLAGS:-}"
     fi
 
-    ${NICE} make -j"${JOBS}" 2>&1 | log "build.log"
+    ${NICE} make -s libs 2>&1 | log "${build_time}-build.log"
 
-    ${NICE} make install PREFIX="${install_dir}" 2>&1 | log "build.log"
+    ${NICE} make -s install PREFIX="${install_dir}" 2>&1 | log "${build_time}-build.log"
 
-    package "${install_dir}" "${outdir}/${NAME}-${VERSION}-static-${CROSS_TARGET}-${build_time}.tar.xz"
+    package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
+  }
   popd >/dev/null
+}
 popd >/dev/null
-
-
-#      ${NICE} make -j"$(nproc)" 2>&1 | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
-#      ${NICE} make install 2>&1 | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
-
-
-
-#    cmake -LAH . 2>&1 || true | tee -a "build.log" | stdbuf -oL grep --color=always -iE "error|fail|fail|cannot|can't|unable|$"
-
-#        -DCMAKE_C_COMPILER=gcc \
-#        -DCMAKE_CXX_COMPILER=g++ \
-#        -DCMAKE_Fortran_COMPILER=gfortran \
-#        -DCMAKE_C_FLAGS="-w -fPIC --static -static -Bstatic ${CFLAGS:+:CFLAGS}" \
-#        -DCMAKE_CXX_FLAGS="-w -fPIC --static -static -Bstatic ${CXXFLAGS:+:CXXFLAGS}" \
-#        -DCMAKE_Fortran_FLAGS="-w -fPIC --static -static -Bstatic ${FCLAGS:+:FCLAGS}" \
-#        -DCMAKE_EXE_LINKER_FLAGS="-w -static -static-libgcc ${LDFLAGS:+:LDFLAGS}" \
-
-#          -DBINARY=64 \
-#          -DBUILD_SHARED_LIBS=0 \
-#          -DBUILD_TESTS=0 \
-#          -DCONSISTENT_FPCSR=1 \
-#          -DDYNAMIC_ARCH=1 \
-#          -DINTERFACE64=1 \
-#          -DNOFORTRAN=0 \
-#          -DNO_AVX2=0 \
-#          -DNO_AVX512=0 \
-#          -DNO_AVX=0 \
-#          -DNO_LAPACK=0 \
-#          -DNUM_THREADS=8 \
-#          -DUSE_LOCKING=0 \
-#          -DUSE_OPENMP=0 \
-#          -DUSE_THREAD=1 \
-#        -DCROSS=1 \
-#        -DNUM_PARALLEL="1" \
-#        -DNUM_THREADS="8" \

@@ -39,6 +39,7 @@ docker run -it --rm \
   --workdir="/workdir" \
   --env="CROSS_TARGET=${CROSS_TARGET}" \
   --env="BUILD_TIME=${BUILD_TIME}" \
+  --env="WITH_THREADS=${WITH_THREADS}" \
   --env="UID=$(id -u)" \
   --env="GID=$(id -g)" \
   --env="USER=${USER}" \
