@@ -3,7 +3,7 @@
 import sys
 
 
-def find_architectures_after(lines, intel, amd, excludes):
+def find_architectures_after(lines, intel, amd, excludes, includes):
     mode = None
     intel_found = False
     amd_found = False
@@ -34,13 +34,17 @@ def find_architectures_after(lines, intel, amd, excludes):
     for exclude in excludes:
         archs.remove(exclude)
 
-    return archs
+    return includes + archs
 
 
 def main():
     lines = sys.stdin.read().splitlines()
     archs = find_architectures_after(
-        lines, intel="HASWELL", amd="BULLDOZER", excludes=["ATOM"]
+        lines,
+        intel="HASWELL",
+        amd="BULLDOZER",
+        excludes=["ATOM"],
+        includes=["CORE2"],
     )
     print(" ".join(archs))
 

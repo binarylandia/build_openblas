@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
 
 export BUILDKIT_PROGRESS=plain
 export PROGRESS_NO_TRUNC=1
@@ -16,7 +16,7 @@ DOCKER_CONTAINER_NAME="${DOCKER_IMAGE_NAME_SAFE}-${CROSS_TARGET}-$(date -u "+%Y-
 USER="user"
 GROUP="user"
 
-docker build \
+docker build -q \
   --file="./dev/${CROSS_TARGET}.dockerfile" \
   --tag="$DOCKER_IMAGE_NAME_SAFE" \
   --network=host \
@@ -24,11 +24,11 @@ docker build \
   --build-arg="GID=$(id -g)" \
   --build-arg="USER=${USER}" \
   --build-arg="GROUP=${GROUP}" \
-  .
+  . &>/dev/null
 
 mkdir -p .build .cache/ccache .opt .out
 
-docker run -it --rm \
+docker run --rm \
   --init \
   --name="$DOCKER_CONTAINER_NAME" \
   --hostname="${DOCKER_IMAGE_NAME_SAFE}" \
@@ -39,7 +39,6 @@ docker run -it --rm \
   --workdir="/workdir" \
   --env="CROSS_TARGET=${CROSS_TARGET}" \
   --env="BUILD_TIME=${BUILD_TIME}" \
-  --env="WITH_THREADS=${WITH_THREADS}" \
   --env="UID=$(id -u)" \
   --env="GID=$(id -g)" \
   --env="USER=${USER}" \

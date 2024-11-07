@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
 
 : "${CROSS_TARGET:? "$0: \$CROSS_TARGET is not set"}"
 
@@ -13,13 +13,14 @@ export CXXFLAGS="-w ${CXXFLAGS:-}"
 export FFLAGS="-w ${FFLAGS:-}"
 export LDFLAGS="-s ${LDFLAGS:-}"
 
-export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
-export CXXFLAGS="-static-libgcc -static-libstdc++ ${CXXFLAGS:-}"
-export FFLAGS="-static-libgcc -static-libgfortran ${FFLAGS:-}"
-export LDFLAGS="-static-libgcc -static-libstdc++ ${LDFLAGS:-}"
+#export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
+#export CXXFLAGS="-static-libgcc -static-libstdc++ ${CXXFLAGS:-}"
+#export FFLAGS="-static-libgcc -static-libgfortran ${FFLAGS:-}"
+#export LDFLAGS="-static-libgcc -static-libstdc++ ${LDFLAGS:-}"
 
 #export CFLAGS="-static --static ${CFLAGS:-}"
 #export CXXFLAGS="-static --static ${CXXFLAGS:-}"
+#export FFLAGS="-static --static ${FFLAGS:-}"
 #export LDFLAGS="-static --static ${LDFLAGS:-}"
 
 export CFLAGS="-fPIC ${CFLAGS:-}"
@@ -71,75 +72,100 @@ function package() {
     ${NICE} xz -T0 -k >"${output_tarball}"
 }
 
-# For explanation of build variables, see
-# https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
-flavor=""
-if ((WITH_THREADS > 1)); then
-  export USE_THREAD="1"
-  export NUM_THREADS="${WITH_THREADS:-1}"
-  export USE_LOCKING="1"
-  flavor="-threads"
-else
-  export USE_THREAD="0"
-  export NUM_THREADS="1"
-  export USE_LOCKING="1"
-fi
-
-build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}${flavor}"
-install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}${flavor}"
-outdir="$(abspath "${OUT_DIR}")/${build_time}"
-mkdir -p "${build_dir}" "${install_dir}" "${outdir}"
-
-pushd "$build_dir" >/dev/null
-{
-  src_dir="${NAME}-${VERSION}"
-
-  if [ ! -d "${src_dir}" ]; then
-    git config --global advice.detachedHead false
-    git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}"
-  fi
-
-  pushd "${src_dir}" >/dev/null
-  {
+for relapack in "0" "1"; do
+  for threads in "0" "64"; do
     # For explanation of build variables, see
     # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
-    export BINARY="64"
-    export TARGET="${OPENBLAS_TARGET:-}"
-    export HOSTCC="${OPENBLAS_HOSTCC:-}"
-
-    export CROSS="1"
-    export DYNAMIC_ARCH="1"
-    export FIXED_LIBNAME="1"
-
-    export BUILD_SHARED="0"
-    export BUILD_STATIC="1"
-    export NO_SHARED="1"
-    export NO_STATIC="0"
-
-    export USE_OPENMP="0"
-    export NUM_PARALLEL="1"
-
-    if [[ "${CROSS_TARGET}" == x86_64* ]]; then
-      DYNAMIC_LIST="$(../../../scripts/get_x86_archs <"$build_dir/${src_dir}/TargetList.txt")"
-      export DYNAMIC_LIST
+    flavor=""
+    if ((threads > 1)); then
+      export USE_THREAD="1"
+      export NUM_THREADS="${threads:-1}"
+      export USE_LOCKING="1"
+      flavor="${flavor}-threads"
+    else
+      export USE_THREAD="0"
+      export NUM_THREADS="1"
+      export USE_LOCKING="1"
     fi
 
-    if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
-      export CONSISTENT_FPCSR="1"
-    elif [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
-      apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-      export CFLAGS="${apple_common} ${CFLAGS:-}"
-      export CXXFLAGS="${apple_common} ${CXXFLAGS:-}"
-      export FFLAGS="${apple_common} ${FFLAGS:-}"
-      export LDFLAGS="${apple_common} ${LDFLAGS:-}"
+    if [ "${relapack}" == "1" ]; then
+      export BUILD_RELAPACK=1
+      export RELAPACK_REPLACE=1
+      flavor="${flavor}-relapack"
     fi
 
-    ${NICE} make -s libs 2>&1 | log "${build_time}-build.log"
+    build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}${flavor}"
+    install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}${flavor}"
+    outdir="$(abspath "${OUT_DIR}")/${build_time}"
+    mkdir -p "${build_dir}" "${install_dir}" "${outdir}"
 
-    ${NICE} make -s install PREFIX="${install_dir}" 2>&1 | log "${build_time}-build.log"
+    pushd "$build_dir" >/dev/null
+    {
+      src_dir="${NAME}-${VERSION}"
 
-    package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
-  }
-  popd >/dev/null
-}
-popd >/dev/null
+      if [ ! -d "${src_dir}" ]; then
+        git config --global advice.detachedHead false
+        git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}" 2>&1 | ../../scripts/no_noise
+      fi
+
+      pushd "${src_dir}" >/dev/null
+      {
+        # For explanation of build variables, see
+        # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
+        export BINARY="64"
+
+        export NO_LAPACKE="0"
+        export NO_LAPACK="0"
+        export NOFORTRAN="0"
+        export NO_AFFINITY="1"
+        export NO_WARMUP="1"
+
+        export CROSS="1"
+        export DYNAMIC_ARCH="1"
+        export FIXED_LIBNAME="1"
+
+        export BUILD_SHARED="0"
+        export BUILD_STATIC="1"
+        export NO_SHARED="1"
+        export NO_STATIC="0"
+
+        export USE_OPENMP="0"
+        export NUM_PARALLEL="1"
+
+        case "${CROSS_TARGET}" in
+        aarch64-apple* | aarch64-darwin*)
+          export TARGET="VORTEX"
+          ;;
+        aarch64*)
+          export TARGET="ARMV8"
+          ;;
+        x86_64*)
+          export TARGET="HASWELL"
+          DYNAMIC_LIST="$(../../../scripts/get_x86_archs <"$build_dir/${src_dir}/TargetList.txt")"
+          export DYNAMIC_LIST
+          ;;
+        esac
+
+        if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
+          export CONSISTENT_FPCSR="1"
+        elif [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+          apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          export CFLAGS="${apple_common} ${CFLAGS:-}"
+          export CXXFLAGS="${apple_common} ${CXXFLAGS:-}"
+          export FFLAGS="${apple_common} ${FFLAGS:-}"
+          export LDFLAGS="${apple_common} ${LDFLAGS:-}"
+        fi
+
+        export FFLAGS="${FFLAGS} -frecursive"
+
+        ${NICE} make -s 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
+
+        ${NICE} make -s install PREFIX="${install_dir}" 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
+
+        package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
+      }
+      popd >/dev/null
+    }
+    popd >/dev/null
+  done
+done

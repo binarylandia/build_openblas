@@ -52,6 +52,7 @@ RUN set -euxo pipefail >/dev/null \
 && ls ${GCC_DIR}/bin/${TRIPLET}-gcc-ar \
 && ${GCC_DIR}/bin/${TRIPLET}-gcc-ar --version
 
+ENV HOSTCC="/usr/bin/gcc"
 ENV CC="${GCC_DIR}/bin/${TRIPLET}-cc"
 ENV CXX="${GCC_DIR}/bin/${TRIPLET}-g++"
 ENV FC="${GCC_DIR}/bin/${TRIPLET}-gfortran"
@@ -70,11 +71,6 @@ ENV READELF="${GCC_DIR}/bin/${TRIPLET}-readelf"
 ENV SIZE="${GCC_DIR}/bin/${TRIPLET}-size"
 ENV STRINGS="${GCC_DIR}/bin/${TRIPLET}-strings"
 ENV STRIP="${GCC_DIR}/bin/${TRIPLET}-strip"
-
-ENV OPENBLAS_BINARY="64"
-ENV OPENBLAS_CROSS="1"
-ENV OPENBLAS_HOSTCC="/usr/bin/gcc"
-ENV OPENBLAS_TARGET="ARMV8"
 
 
 ARG USER=user

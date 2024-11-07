@@ -18,20 +18,14 @@ targets=(
   "x86_64-unknown-linux-musl"
 )
 
-with_threads=(
-  "0"
-  "8"
-)
-
 export BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')"
 
 function run_one() {
   local target=${1:?}
-  local threads=${2:?}
-  printf "\nBuilding for %s\n" "${target} (threads=${threads})"
-  script -q /dev/null -c "CROSS_TARGET=${target} BUILD_TIME=${BUILD_TIME} WITH_THREADS=${threads} ./build" || cat ".cache/results/${target}"
+  printf "Building for %s\n" "${target}"
+  CROSS_TARGET=${target} BUILD_TIME=${BUILD_TIME} ./build
 }
 export -f run_one
 
 parallel --line-buffer --tag --tagstring '|{#}| \033[34m{= sprintf("%-26s", $_) =}\033[0m' --jobs="${#targets[@]}" \
-  run_one ::: "${targets[@]}" ::: "${with_threads[@]}"
+  run_one ::: "${targets[@]}"

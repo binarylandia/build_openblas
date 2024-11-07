@@ -1,0 +1,30 @@
+#!/usr/bin/env python3.12
+
+import sys
+import re
+
+exact_matches=[
+]
+
+patterns = [
+    r'.*Copying .* to .*',
+    r'.*Generating .* in .*',
+    r'.*ar: `u\' modifier ignored since `D\' is the default \(see `U\'\)',
+    r'.*ar: creating .*',
+    r'.*ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker',
+    r'.*ld: warning: .* missing .note.GNU-stack section implies executable stack',
+    r'Cloning into .*',
+    r'Install OK!',
+    r'.*warning: -jN forced in submake: disabling jobserver mode.',
+]
+
+regexes = [re.compile(pattern) for pattern in patterns]
+
+def no_noise():
+    for line in sys.stdin:
+        if not any(line.strip() == match for match in exact_matches) and not any(regex.search(line.strip()) for regex in regexes):
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+if __name__ == "__main__":
+    no_noise()
