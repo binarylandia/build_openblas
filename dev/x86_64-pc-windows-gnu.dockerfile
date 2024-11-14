@@ -46,7 +46,7 @@ ENV TRIPLET="x86_64-w64-mingw32"
 ENV GCC_DIR="/opt/gcc"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \
-&& curl -fsSL "https://github.com/binarylandia/build_crosstool-ng/releases/download/2024-11-02_10-18-46/gcc-14.2.0-${TRIPLET}-2024-11-02_10-18-46.tar.xz" | tar -C "${GCC_DIR}" -xJ \
+&& curl -fsSL "https://github.com/binarylandia/build_crosstool-ng/releases/download/2024-11-08_06-06-34/gcc-14.2.0-${TRIPLET}-2024-11-08_06-06-34.tar.xz" | tar -C "${GCC_DIR}" -xJ \
 && ls ${GCC_DIR}/bin/${TRIPLET}-gcc \
 && ${GCC_DIR}/bin/${TRIPLET}-gcc -v \
 && ls ${GCC_DIR}/bin/${TRIPLET}-gcc-ar \
