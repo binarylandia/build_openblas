@@ -16,7 +16,7 @@ DOCKER_CONTAINER_NAME="${DOCKER_IMAGE_NAME_SAFE}-${CROSS_TARGET}-$(date -u "+%Y-
 USER="user"
 GROUP="user"
 
-docker build -q \
+docker build \
   --file="./dev/${CROSS_TARGET}.dockerfile" \
   --tag="$DOCKER_IMAGE_NAME_SAFE" \
   --network=host \
@@ -24,7 +24,7 @@ docker build -q \
   --build-arg="GID=$(id -g)" \
   --build-arg="USER=${USER}" \
   --build-arg="GROUP=${GROUP}" \
-  . &>/dev/null
+  .
 
 mkdir -p .build .cache/ccache .opt .out
 
@@ -48,4 +48,4 @@ docker run --rm "$(tty -s && echo "-it")" \
   --env="LANG=C.UTF-8" \
   --ulimit core=0 \
   "$DOCKER_IMAGE_NAME_SAFE" \
-  bash -c "${*:-'bash ./scripts/main'}"
+  bash -c "${*:-'./scripts/main'}"
