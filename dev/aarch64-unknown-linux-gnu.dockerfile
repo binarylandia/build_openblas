@@ -52,25 +52,46 @@ RUN set -euxo pipefail >/dev/null \
 && ls ${GCC_DIR}/bin/${TRIPLET}-gcc-ar \
 && ${GCC_DIR}/bin/${TRIPLET}-gcc-ar --version
 
-ENV HOSTCC="/usr/bin/gcc"
-ENV CC="${GCC_DIR}/bin/${TRIPLET}-cc"
-ENV CXX="${GCC_DIR}/bin/${TRIPLET}-g++"
-ENV FC="${GCC_DIR}/bin/${TRIPLET}-gfortran"
-ENV ADDR2LINE="${GCC_DIR}/bin/${TRIPLET}-addr2line"
-ENV AR="${GCC_DIR}/bin/${TRIPLET}-gcc-ar"
-ENV AS="${GCC_DIR}/bin/${TRIPLET}-as"
-ENV CPP="${GCC_DIR}/bin/${TRIPLET}-cpp"
+ENV TRIPLET="aarch64-unknown-linux-gnu"
+ENV LLVM_DIR="/opt/llvm"
+RUN set -euxo pipefail >/dev/null \
+&& mkdir -p "${LLVM_DIR}" \
+&& curl -fsSL "https://github.com/binarylandia/build_llvm/releases/download/llvm-20.1.8-2025-09-21_06-27-58/llvm-20.1.8-2025-09-21_06-27-58.tar.gz" | tar -C "${LLVM_DIR}" -xz \
+&& ls "${LLVM_DIR}/bin/clang" \
+&& "${LLVM_DIR}/bin/clang" --version \
+&& ls "${LLVM_DIR}/bin/flang-new" \
+&& "${LLVM_DIR}/bin/flang-new" --version \
+&& ls "${LLVM_DIR}/bin/llvm-ar" \
+&& "${LLVM_DIR}/bin/llvm-ar" --version
+
+ENV HOSTCC="${LLVM_DIR}/bin/clang"
+
 ENV ELFEDIT="${GCC_DIR}/bin/${TRIPLET}-elfedit"
-ENV LD="${GCC_DIR}/bin/${TRIPLET}-ld"
 ENV LDD="${GCC_DIR}/bin/${TRIPLET}-ldd"
-ENV NM="${GCC_DIR}/bin/${TRIPLET}-gcc-nm"
-ENV OBJCOPY="${GCC_DIR}/bin/${TRIPLET}-objcopy"
-ENV OBJDUMP="${GCC_DIR}/bin/${TRIPLET}-objdump"
-ENV RANLIB="${GCC_DIR}/bin/${TRIPLET}-gcc-ranlib"
-ENV READELF="${GCC_DIR}/bin/${TRIPLET}-readelf"
-ENV SIZE="${GCC_DIR}/bin/${TRIPLET}-size"
-ENV STRINGS="${GCC_DIR}/bin/${TRIPLET}-strings"
-ENV STRIP="${GCC_DIR}/bin/${TRIPLET}-strip"
+
+ENV CC="${LLVM_DIR}/bin/clang"
+ENV CXX="${LLVM_DIR}/bin/clang++"
+ENV FC="${LLVM_DIR}/bin/flang-new"
+ENV ADDR2LINE="${LLVM_DIR}/bin/llvm-addr2line"
+ENV AR="${LLVM_DIR}/bin/llvm-ar"
+ENV AS="${LLVM_DIR}/bin/llvm-as"
+ENV CPP="${LLVM_DIR}/bin/clang-cpp"
+ENV DLLTOOL="${LLVM_DIR}/bin/llvm-dlltool"
+ENV LD="${LLVM_DIR}/bin/ld.lld"
+ENV NM="${LLVM_DIR}/bin/llvm-nm"
+ENV OBJCOPY="${LLVM_DIR}/bin/llvm-objcopy"
+ENV OBJDUMP="${LLVM_DIR}/bin/llvm-objdump"
+ENV RANLIB="${LLVM_DIR}/bin/llvm-ranlib"
+ENV READELF="${LLVM_DIR}/bin/llvm-readelf"
+ENV SIZE="${LLVM_DIR}/bin/llvm-size"
+ENV STRINGS="${LLVM_DIR}/bin/llvm-strings"
+ENV STRIP="${LLVM_DIR}/bin/llvm-strip"
+
+RUN set -euxo pipefail >/dev/null \
+&& ln -sf /usr/bin/ld "${LD}"
+
+RUN set -euxo pipefail >/dev/null \
+&& /usr/bin/ld --version
 
 
 ARG USER=user

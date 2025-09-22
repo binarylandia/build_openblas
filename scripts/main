@@ -11,7 +11,7 @@ export BRANCH="v${VERSION}"
 export CFLAGS="-w ${CFLAGS:-}"
 export CXXFLAGS="-w ${CXXFLAGS:-}"
 export FFLAGS="-w ${FFLAGS:-}"
-export LDFLAGS="-s ${LDFLAGS:-}"
+export LDFLAGS="-Wl,-s ${LDFLAGS:-}"
 
 #export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
 #export CXXFLAGS="-static-libgcc -static-libstdc++ ${CXXFLAGS:-}"
@@ -34,16 +34,16 @@ export LDFLAGS="-fPIC ${LDFLAGS:-}"
 
 #export CC="${CC:-gcc}"
 #export CXX="${CXX:-g++}"
-export AR="${AR:-gcc-ar}"
-export NM="${NM:-gcc-nm}"
-export RANLIB="${RANLIB:-gcc-ranlib}"
+export AR="${AR:-llvm-ar}"
+export NM="${NM:-llvm-nm}"
+export RANLIB="${RANLIB:-llvm-ranlib}"
 
 export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
 export CCACHE_MAXSIZE="50G"
-export CC="ccache ${CC:-gcc}"
-export CXX="ccache ${CXX:-g++}"
-export FC="${FC:-gfortran}"
+export CC="ccache ${CC:-clang}"
+export CXX="ccache ${CXX:-clang++}"
+export FC="${FC:-flang-new}"
 
 export NAME="openblas"
 export BUILD_DIR=".build"
@@ -159,7 +159,9 @@ for relapack in "0" "1"; do
           export LDFLAGS="${apple_common} ${LDFLAGS:-}"
         fi
 
-        export FFLAGS="${FFLAGS} -frecursive"
+        if [[ "${FC}" != *"flang"* ]]; then
+          export FFLAGS="${FFLAGS} -frecursive"
+        fi
 
         ${NICE} make -s 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
 

@@ -50,7 +50,7 @@ RUN set -euxo pipefail >/dev/null \
 && gcc-ar --version
 
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/binarylandia/build_llvm/releases/download/llvm-19.1.3-2024-11-03_15-15-54/llvm-19.1.3-2024-11-03_15-15-54.tar.xz" | tar -C "/usr" -xJ \
+&& curl -fsSL "https://github.com/binarylandia/build_llvm/releases/download/llvm-20.1.8-2025-09-21_06-27-58/llvm-20.1.8-2025-09-21_06-27-58.tar.gz" | tar -C "/usr" -xz \
 && ls /usr/bin/clang \
 && clang -v
 
