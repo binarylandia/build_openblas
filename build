@@ -11,7 +11,7 @@ CROSS_TARGET="${CROSS_TARGET:-native}"
 BUILD_TIME="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 DOCKER_REPO="openblas_builder"
 DOCKER_IMAGE_NAME_SAFE="${DOCKER_REPO//\//-}-${CROSS_TARGET}"
-DOCKER_CONTAINER_NAME="${DOCKER_IMAGE_NAME_SAFE}-${CROSS_TARGET}-$(date -u "+%Y-%m-%d_%H-%M-%S_%3NZ")"
+DOCKER_CONTAINER_NAME="${DOCKER_IMAGE_NAME_SAFE}-$(date -u "+%Y-%m-%d_%H-%M-%S_%3NZ")"
 
 USER="user"
 GROUP="user"
@@ -28,7 +28,7 @@ docker build \
 
 mkdir -p .build .cache/ccache .opt .out
 
-docker run --rm "$(tty -s && echo "-it")" \
+docker run --rm $(tty -s && echo "-it") \
   --init \
   --name="$DOCKER_CONTAINER_NAME" \
   --hostname="${DOCKER_IMAGE_NAME_SAFE}" \

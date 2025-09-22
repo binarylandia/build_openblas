@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
+trap "exit" INT
 
 : "${CROSS_TARGET:? "$0: \$CROSS_TARGET is not set"}"
 
@@ -107,6 +107,9 @@ for relapack in "0" "1"; do
         git config --global advice.detachedHead false
         git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}" 2>&1 | ../../scripts/no_noise
       fi
+
+      sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
+      sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
 
       pushd "${src_dir}" >/dev/null
       {

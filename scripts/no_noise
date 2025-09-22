@@ -11,11 +11,14 @@ patterns = [
     r'.*Generating .* in .*',
     r'.*ar: `u\' modifier ignored since `D\' is the default \(see `U\'\)',
     r'.*ar: creating .*',
+    r'.*ar: warning: creating .*',
     r'.*ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker',
     r'.*ld: warning: .* missing .note.GNU-stack section implies executable stack',
     r'Cloning into .*',
     r'Install OK!',
     r'.*warning: -jN forced in submake: disabling jobserver mode.',
+    r'.*f_check: line \d+: \[: .*: integer expression expected',
+    r'.*has no symbols',
 ]
 
 regexes = [re.compile(pattern) for pattern in patterns]
