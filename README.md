@@ -1,6 +1,4 @@
-# build_openblas
-
-Prebuilt static OpenBLAS libraries for multiple platforms.
+# Prebuilt static OpenBLAS libraries for multiple platforms
 
 ## [Releases](https://github.com/binarylandia/build_openblas/releases)
 
