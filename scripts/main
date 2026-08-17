@@ -165,6 +165,16 @@ for relapack in "0" "1"; do
 
         ${NICE} make -s install PREFIX="${install_dir}" 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
 
+        # Reject legacy .ctors/.dtors constructors. GNU ld folds them into
+        # .init_array, but lld (by design) does not, so a constructor such as
+        # OpenBLAS's DYNAMIC_ARCH gotoblas_init silently never runs and the first
+        # BLAS call dereferences a null dispatch table. GCC >= 12 emits .init_array
+        # by default; older GCC without --enable-initfini-array emits .ctors.
+        if "${READELF:-readelf}" -SW "${install_dir}/lib/libopenblas.a" | grep -qE '\.(ctors|dtors)'; then
+          printf 'ERROR: %s contains legacy .ctors/.dtors sections; constructors will not run under lld. Build with GCC >= 12 or configure GCC with --enable-initfini-array.\n' "${install_dir}/lib/libopenblas.a" >&2
+          exit 1
+        fi
+
         package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
       }
       popd >/dev/null
