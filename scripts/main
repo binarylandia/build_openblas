@@ -111,6 +111,17 @@ for relapack in "0" "1"; do
       sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
       sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
 
+      # OpenBLAS applies the DYNAMIC_LIST preprocessor defines (-DDYNAMIC_LIST,
+      # -DDYN_<core>) to CCOMMON_OPT for x86_64 only. The arm64 block computes
+      # them into XCCOMMON_OPT but never applies them, so dynamic_arm64.c is
+      # built in full-core mode and references kernels that DYNAMIC_LIST omitted
+      # from the build, breaking the link. Apply them for arm64 as x86_64 does.
+      if ! grep -qF 'CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST' "${src_dir}/Makefile.system"; then
+        sed -i '/^XCCOMMON_OPT = -DDYNAMIC_LIST -DDYN_ARMV8$/{n;a\
+CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
+}' "${src_dir}/Makefile.system"
+      fi
+
       pushd "${src_dir}" >/dev/null
       {
         # For explanation of build variables, see
@@ -141,6 +152,13 @@ for relapack in "0" "1"; do
           ;;
         aarch64*)
           export TARGET="ARMV8"
+          # Restrict DYNAMIC_ARCH to kernels the cross toolchain's assembler
+          # (binutils 2.27) can build. It supports up to armv8.2-a, so the SVE
+          # and armv8.3-a+ kernels (THUNDERX3T110, NEOVERSEV1, NEOVERSEN2,
+          # A64FX, ARMV8SVE) fail to assemble under GCC 14.2. ARMV8 stays the
+          # runtime baseline for any CPU not in this list.
+          DYNAMIC_LIST="CORTEXA53 CORTEXA57 NEOVERSEN1 THUNDERX THUNDERX2T99 TSV110 EMAG8180"
+          export DYNAMIC_LIST
           ;;
         x86_64*)
           export TARGET="HASWELL"
