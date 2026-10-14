@@ -63,6 +63,21 @@ function log() {
   tee -a "${1}" | stdbuf -oL grep --color=always -iE "error|fail|cannot|can't|unable|"
 }
 
+# Print the archive members that set MH_SUBSECTIONS_VIA_SYMBOLS and define .L
+# symbols in their code.
+function macho_split_members() {
+  local lib="${1}"
+  local split
+  local labeled
+  split="$(llvm-readobj --file-headers "${lib}" |
+    awk '/^File: / {m = $2; sub(/^.*\(/, "", m); sub(/\)$/, "", m)} /MH_SUBSECTIONS_VIA_SYMBOLS \(/ {print m}' |
+    sort -u)" || return
+  labeled="$(llvm-nm -A --defined-only "${lib}" |
+    awk '$NF ~ /^\.L/ && $(NF-1) ~ /^[tT]$/ {split($1, a, ":"); print a[2]}' |
+    sort -u)" || return
+  comm -12 <(printf '%s\n' "${split}") <(printf '%s\n' "${labeled}")
+}
+
 function package() {
   local input_dir="${1}"
   local output_tarball="${2}"
@@ -120,6 +135,21 @@ for relapack in "0" "1"; do
         sed -i '/^XCCOMMON_OPT = -DDYNAMIC_LIST -DDYN_ARMV8$/{n;a\
 CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
 }' "${src_dir}/Makefile.system"
+      fi
+
+      # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
+      # .subsections_via_symbols directive, which lets the linker split a section
+      # into one piece per symbol. The kernels name their branch targets with .L
+      # labels, which are ordinary symbols in Mach-O (only L labels are local), so
+      # the linker splits each function at its branch targets. Dead stripping
+      # (rustc passes -dead_strip) and deduplication then drop the pieces that
+      # are reached only by falling through, and the truncated kernel runs into
+      # unrelated code. Without the directive, each kernel object stays whole.
+      # https://github.com/OpenMathLib/OpenBLAS/issues/6089
+      sed -i 's|^#define EPILOGUE\t\.subsections_via_symbols$|#define EPILOGUE|' "${src_dir}/common_x86_64.h"
+      if grep -q 'subsections_via_symbols' "${src_dir}/common_x86_64.h"; then
+        printf 'ERROR: %s still sets .subsections_via_symbols; update the patch for this OpenBLAS version.\n' "${src_dir}/common_x86_64.h" >&2
+        exit 1
       fi
 
       pushd "${src_dir}" >/dev/null
@@ -191,6 +221,19 @@ CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
         if "${READELF:-readelf}" -SW "${install_dir}/lib/libopenblas.a" | grep -qE '\.(ctors|dtors)'; then
           printf 'ERROR: %s contains legacy .ctors/.dtors sections; constructors will not run under lld. Build with GCC >= 12 or configure GCC with --enable-initfini-array.\n' "${install_dir}/lib/libopenblas.a" >&2
           exit 1
+        fi
+
+        # Reject Mach-O objects that the linker would split at their .L labels
+        # (see the common_x86_64.h patch above).
+        if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+          if ! split_members="$(macho_split_members "${install_dir}/lib/libopenblas.a")"; then
+            printf 'ERROR: cannot read the objects of %s\n' "${install_dir}/lib/libopenblas.a" >&2
+            exit 1
+          fi
+          if [ -n "${split_members}" ]; then
+            printf 'ERROR: %s has objects with MH_SUBSECTIONS_VIA_SYMBOLS and .L symbols; the linker splits their functions:\n%s\n' "${install_dir}/lib/libopenblas.a" "${split_members}" >&2
+            exit 1
+          fi
         fi
 
         package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
