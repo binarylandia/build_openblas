@@ -87,8 +87,33 @@ function package() {
     ${NICE} xz -T0 -k >"${output_tarball}"
 }
 
+# Variants to build, named as in the archive names. All four by default; select
+# some with, for example: ./build 'VARIANTS="plain threads" ./scripts/main'
+VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
+for variant in ${VARIANTS}; do
+  case "${variant}" in
+  plain | threads | relapack | threads-relapack) ;;
+  *)
+    printf 'ERROR: unknown variant "%s" in VARIANTS; known: plain threads relapack threads-relapack\n' "${variant}" >&2
+    exit 1
+    ;;
+  esac
+done
+
 for relapack in "0" "1"; do
   for threads in "0" "64"; do
+    variant="plain"
+    if ((threads > 1)); then
+      variant="threads"
+    fi
+    if [ "${relapack}" == "1" ]; then
+      variant="${variant/#plain/}"
+      variant="${variant:+${variant}-}relapack"
+    fi
+    if [[ " ${VARIANTS} " != *" ${variant} "* ]]; then
+      continue
+    fi
+
     # For explanation of build variables, see
     # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
     flavor=""
