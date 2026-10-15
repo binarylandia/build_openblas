@@ -11,6 +11,19 @@ Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static lib
 - **relapack**: ReLAPACK recursive algorithms
 - **threads-relapack**: Multi-threaded with ReLAPACK
 
+## WebAssembly
+
+The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=WASM128_GENERIC` (SIMD128 kernels), with LAPACK from the C translation that ships with OpenBLAS. It uses a develop commit of OpenBLAS whose LAPACK functions take no hidden string lengths and return `void`, plus the patches in `patches/wasm32-unknown-emscripten/`, because WebAssembly traps on a call whose signature differs from the callee.
+
+- **plain**: Single-threaded
+- **mt**: For modules with threads (`-pthread`). Every object is compiled with atomics, which `wasm-ld` requires for shared memory, and `USE_LOCKING=1` locks the work buffers, so threads can call BLAS at the same time. OpenBLAS's own thread pool stays off
+
+Emscripten has no ABI guarantee between versions, so an archive links only with the Emscripten version that built it. The version is part of the file name (`wasm32-unknown-emscripten.6.0.10`) and is stored in `share/openblas/emscripten-version.txt`.
+
+```bash
+CROSS_TARGET=wasm32-unknown-emscripten ./build
+```
+
 ## Features
 
 - Static library with position-independent code (-fPIC)
@@ -25,7 +38,8 @@ Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static lib
 - Building portable scientific computing binaries
 - Rust, Python, or Julia projects requiring OpenBLAS
 - Cross-platform numerical computing
+- WebAssembly applications built with Emscripten
 
 ## Keywords
 
-openblas static, prebuilt openblas, openblas download, blas static library, lapack static, cross compile openblas, openblas linux, openblas macos, openblas windows, openblas arm, openblas aarch64, relapack
+openblas static, prebuilt openblas, openblas download, blas static library, lapack static, cross compile openblas, openblas linux, openblas macos, openblas windows, openblas arm, openblas aarch64, relapack, openblas wasm, openblas webassembly, openblas emscripten
