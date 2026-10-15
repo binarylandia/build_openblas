@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+#
+# Usage: $0
+#
+# Build static OpenBLAS archives for wasm32-unknown-emscripten with emcc, check
+# them, and package them into .out/<build time>/. scripts/main runs this script
+# for CROSS_TARGET=wasm32-unknown-emscripten. VARIANTS selects the variants
+# (default: both):
+#
+#   plain  single-threaded
+#   mt     for modules with threads (-pthread): every object is compiled with
+#          atomics, which wasm-ld requires for shared memory, and USE_LOCKING=1
+#          locks the work buffer table of OpenBLAS, so threads that call BLAS at
+#          the same time do not share a buffer. OpenBLAS's own thread pool stays
+#          off (USE_THREAD=0): it does not work in WebAssembly
+#
+# Emscripten has no ABI guarantee between versions, so an archive links only
+# with the Emscripten version that built it. The package name carries that
+# version, and share/openblas/emscripten-version.txt holds the version file of
+# the Emscripten release.
+#
+# Examples:
+#   CROSS_TARGET=wasm32-unknown-emscripten ./build
+#   CROSS_TARGET=wasm32-unknown-emscripten ./build 'VARIANTS=mt ./scripts/main'
+#
+set -euo pipefail
+trap "exit" INT
+
+# shellcheck source=./lib.sh
+source "${BASH_SOURCE%/*}/lib.sh"
+
+: "${CROSS_TARGET:? "$0: \$CROSS_TARGET is not set"}"
+
+# The first develop commit whose C LAPACK functions take no hidden string
+# lengths and return void, as Rust's lapack-sys declares them (OpenMathLib/
+# OpenBLAS#6017). WebAssembly traps on a call whose signature differs from the
+# callee, so released versions do not work.
+COMMIT="eb00d5975cf5386412ade8ed95d691fe8b470c7f"
+SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/archive/${COMMIT}.tar.gz"
+SOURCE_SHA256="1de24958ef91c7c9c202efb6149d8f9db719650dfe5d12e30d5f5a89d2f4a022"
+VERSION="0.3.34.dev-${COMMIT:0:8}"
+NAME="openblas"
+PATCH_DIR="$(abspath "patches/${CROSS_TARGET}")"
+BUILD_DIR="$(abspath ".build")/${CROSS_TARGET}"
+OUT_DIR="$(abspath ".out")"
+INSTALL_ROOT="/opt/${NAME}"
+build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
+
+VARIANTS="${VARIANTS:-plain mt}"
+for variant in ${VARIANTS}; do
+  case "${variant}" in
+  plain | mt) ;;
+  *)
+    printf 'ERROR: unknown variant "%s" in VARIANTS for %s; known: plain mt\n' "${variant}" "${CROSS_TARGET}" >&2
+    exit 1
+    ;;
+  esac
+done
+
+em_root="$(dirname "$(readlink -f "$(command -v emcc)")")"
+em_version="$(<"${em_root}/emscripten-version.txt")"
+em_version="${em_version%-git}"
+
+# Unpack the pinned source into a new directory and apply the patches.
+function fetch_source() {
+  local src_dir="${1}"
+  local tarball="${BUILD_DIR}/${COMMIT}.tar.gz"
+  if [[ ! -f "${tarball}" ]]; then
+    curl -fsSL --retry 3 -o "${tarball}.part" "${SOURCE_URL}"
+    mv "${tarball}.part" "${tarball}"
+  fi
+  local actual
+  actual="$(sha256sum "${tarball}" | cut -d' ' -f1)"
+  if [[ "${actual}" != "${SOURCE_SHA256}" ]]; then
+    rm -f "${tarball}"
+    printf 'ERROR: checksum mismatch for %s: expected %s, got %s\n' "${SOURCE_URL}" "${SOURCE_SHA256}" "${actual}" >&2
+    return 1
+  fi
+  rm -rf "${src_dir}"
+  mkdir -p "${src_dir}"
+  tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
+  local patch_file
+  for patch_file in "${PATCH_DIR}"/*.patch; do
+    printf 'Applying %s\n' "${patch_file##*/}"
+    patch -d "${src_dir}" -p1 --forward --fuzz=0 <"${patch_file}"
+  done
+}
+
+# Link the archive into a program that multiplies a 2 by 2 matrix with dgemm_,
+# run it with Node, and check the product. With -pthread the call runs on a
+# second thread, and wasm-ld rejects every object that was compiled without
+# atomics but needs them.
+function check_link() {
+  local lib="${1}"
+  local test_dir="${2}"
+  shift 2
+  local flags=("$@")
+  rm -rf "${test_dir}"
+  mkdir -p "${test_dir}"
+  printf '{"type": "commonjs"}\n' >"${test_dir}/package.json"
+  cat >"${test_dir}/dgemm.c" <<'EOF'
+#include <pthread.h>
+#include <stdio.h>
+
+void dgemm_(const char *, const char *, const int *, const int *, const int *, const double *,
+            const double *, const int *, const double *, const int *, const double *, double *,
+            const int *);
+
+static double c[4];
+
+static void *multiply(void *arg) {
+  (void)arg;
+  int n = 2;
+  double one = 1;
+  double zero = 0;
+  double a[4] = {1, 2, 3, 4};
+  dgemm_("N", "N", &n, &n, &n, &one, a, &n, a, &n, &zero, c, &n);
+  return NULL;
+}
+
+int main(void) {
+#ifdef ON_THREAD
+  pthread_t thread;
+  pthread_create(&thread, NULL, multiply, NULL);
+  pthread_join(thread, NULL);
+#else
+  multiply(NULL);
+#endif
+  printf("%g %g %g %g\n", c[0], c[1], c[2], c[3]);
+  return 0;
+}
+EOF
+  emcc -O2 "${flags[@]}" "${test_dir}/dgemm.c" "${lib}" -o "${test_dir}/dgemm.js"
+  local product
+  product="$(node "${test_dir}/dgemm.js")"
+  if [[ "${product}" != "7 10 15 22" ]]; then
+    printf 'ERROR: dgemm_ of %s returned "%s", expected "7 10 15 22"\n' "${lib}" "${product}" >&2
+    return 1
+  fi
+}
+
+for variant in ${VARIANTS}; do
+  flavor=""
+  make_vars=(
+    CC=emcc
+    AR=emar
+    RANLIB=emranlib
+    HOSTCC=gcc
+    TARGET=WASM128_GENERIC
+    BINARY=32
+    NOFORTRAN=1
+    C_LAPACK=1
+    NO_LAPACKE=1
+    NO_SHARED=1
+    USE_THREAD=0
+  )
+  link_flags=()
+  emcc_cflags=""
+  if [[ "${variant}" == "mt" ]]; then
+    flavor="-mt"
+    make_vars+=(USE_LOCKING=1)
+    link_flags=(-pthread -sPTHREAD_POOL_SIZE=1 -DON_THREAD)
+    emcc_cflags="-pthread"
+  fi
+
+  build_dir="${BUILD_DIR}/${variant}"
+  src_dir="${build_dir}/src"
+  install_dir="${INSTALL_ROOT}/${CROSS_TARGET}${flavor}"
+  build_log="${build_dir}/${build_time}-build.log"
+  mkdir -p "${build_dir}" "${OUT_DIR}/${build_time}"
+  rm -rf "${install_dir}"
+
+  fetch_source "${src_dir}"
+
+  EMCC_CFLAGS="${emcc_cflags}" ${NICE} make -C "${src_dir}" -j"$(nproc)" libs netlib "${make_vars[@]}" >"${build_log}" 2>&1 || {
+    tail -50 "${build_log}" >&2
+    exit 1
+  }
+  EMCC_CFLAGS="${emcc_cflags}" ${NICE} make -C "${src_dir}" install PREFIX="${install_dir}" "${make_vars[@]}" >>"${build_log}" 2>&1 || {
+    tail -50 "${build_log}" >&2
+    exit 1
+  }
+
+  lib="${install_dir}/lib/lib${NAME}.a"
+  symbols="$(emnm "${lib}" 2>/dev/null)"
+  if ! grep -q ' T dsyev_$' <<<"${symbols}"; then
+    printf 'ERROR: %s does not define dsyev_\n' "${lib}" >&2
+    exit 1
+  fi
+  if [[ "${variant}" == "mt" ]] && ! grep -q -- '-DUSE_LOCKING' "${build_log}"; then
+    printf 'ERROR: the compile commands of %s do not set USE_LOCKING; see %s\n' "${variant}" "${build_log}" >&2
+    exit 1
+  fi
+  check_link "${lib}" "${build_dir}/check" "${link_flags[@]}"
+
+  install -D -m 0644 "${em_root}/emscripten-version.txt" "${install_dir}/share/${NAME}/emscripten-version.txt"
+  package "${install_dir}" "${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+  printf 'Built %s\n' "${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+done
