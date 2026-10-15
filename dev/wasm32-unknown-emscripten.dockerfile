@@ -40,16 +40,17 @@ RUN set -euxo pipefail >/dev/null \
 && ln -s "${NODE_DIR}/bin/node" "/usr/local/bin/node" \
 && node --version
 
-# Emscripten 6.0.10: the archive that `emsdk install 6.0.10` downloads; the build
-# id is the entry of the version in emscripten-releases-tags.json of emsdk. The
-# configuration names the LLVM and Binaryen of the archive. Only the emcc front
-# end goes on PATH. The cache holds the prebuilt system libraries and stays
-# writable for its lock and sanity files, because the container runs as the
-# host user.
 ARG EMSCRIPTEN_VERSION="6.0.10"
 ARG EMSCRIPTEN_BUILD="666337b525e673e769121856d175f6f52b8ead64"
 ARG EMSCRIPTEN_SHA256="a51dd2829bdf725d268974728e032533b106ea01cb482a62288ec12627a7abbe"
 ARG EMSCRIPTEN_DIR="/opt/emscripten"
+
+# Emscripten: the archive that `emsdk install <version>` downloads; the build id
+# is the entry of the version in emscripten-releases-tags.json of emsdk. The
+# configuration names the LLVM and Binaryen of the archive. Only the emcc front
+# end goes on PATH. The cache holds the prebuilt system libraries and stays
+# writable for its lock and sanity files, because the container runs as the
+# host user.
 ENV PATH="${EMSCRIPTEN_DIR}/emscripten:${PATH}"
 RUN set -euxo pipefail >/dev/null \
 && curl -fsSLo "/tmp/wasm-binaries.tar.xz" "https://storage.googleapis.com/webassembly/emscripten-releases-builds/linux/${EMSCRIPTEN_BUILD}/wasm-binaries.tar.xz" \

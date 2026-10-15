@@ -89,7 +89,8 @@ function fetch_source() {
 # Link the archive into a program that multiplies a 2 by 2 matrix with dgemm_,
 # run it with Node, and check the product. With -pthread the call runs on a
 # second thread, and wasm-ld rejects every object that was compiled without
-# atomics but needs them.
+# atomics but needs them. The memory must grow, because the work buffers of
+# OpenBLAS are larger than the default 16 MiB.
 function check_link() {
   local lib="${1}"
   local test_dir="${2}"
@@ -130,7 +131,7 @@ int main(void) {
   return 0;
 }
 EOF
-  emcc -O2 "${flags[@]}" "${test_dir}/dgemm.c" "${lib}" -o "${test_dir}/dgemm.js"
+  emcc -O2 -sALLOW_MEMORY_GROWTH "${flags[@]}" "${test_dir}/dgemm.c" "${lib}" -o "${test_dir}/dgemm.js"
   local product
   product="$(node "${test_dir}/dgemm.js")"
   if [[ "${product}" != "7 10 15 22" ]]; then
