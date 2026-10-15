@@ -140,6 +140,10 @@ EOF
   fi
 }
 
+# NUM_THREADS sets MAX_CPU_NUMBER, which sizes the work buffer table of OpenBLAS
+# (2 slots per thread, at least 50). Unset, the build takes the core count of
+# the build machine, so the archive would depend on where it was built. plain
+# takes 1, and mt takes 64, as the native plain and threads variants do.
 for variant in ${VARIANTS}; do
   flavor=""
   make_vars=(
@@ -156,14 +160,18 @@ for variant in ${VARIANTS}; do
     FIXED_LIBNAME=1
     USE_THREAD=0
   )
+  num_threads=1
   link_flags=()
   emcc_cflags=""
   if [[ "${variant}" == "mt" ]]; then
     flavor="-mt"
     make_vars+=(USE_LOCKING=1)
+    num_threads=64
     link_flags=(-pthread -sPTHREAD_POOL_SIZE=1 -DON_THREAD)
     emcc_cflags="-pthread"
   fi
+
+  make_vars+=(NUM_THREADS="${num_threads}")
 
   build_dir="${BUILD_DIR}/${variant}"
   src_dir="${build_dir}/src"
