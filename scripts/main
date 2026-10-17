@@ -85,8 +85,8 @@ function macho_split_members() {
 }
 
 # The cores of the arm64 DYNAMIC_CORE list of OpenBLAS 0.3.34 on Linux
-# (Makefile.system).
-ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX ARMV9SME THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
+# (Makefile.system) with NO_SME.
+ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
 
 # Fail when the archive lacks the dispatch table gotoblas_<core> of a core.
 function check_kernel_cores() {
@@ -231,6 +231,14 @@ for relapack in "0" "1"; do
 
         export USE_OPENMP="0"
         export NUM_PARALLEL="1"
+
+        # The ARMV9SME core has single-precision kernels (SGEMM, SSYMM, SSYRK,
+        # SSYR2K, STRMM) whose code compiles only with clang; built with GCC
+        # they return without computing (OpenMathLib/OpenBLAS#6099). NO_SME
+        # leaves the core out, and SME CPUs use the SVE or Neoverse N1 kernels.
+        if [[ "${CROSS_TARGET}" == aarch64* ]]; then
+          export NO_SME="1"
+        fi
 
         case "${CROSS_TARGET}" in
         aarch64-apple* | aarch64-darwin*)
