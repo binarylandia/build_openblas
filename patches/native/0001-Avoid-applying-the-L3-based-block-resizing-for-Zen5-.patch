@@ -1,0 +1,35 @@
+From a59a5c7605ac7ed225e7a43acb9fa4c24e91a22a Mon Sep 17 00:00:00 2001
+From: Martin Kroeker <martin@ruby.chemie.uni-freiburg.de>
+Date: Sun, 6 Sep 2026 00:19:20 +0200
+Subject: [PATCH] Avoid applying the L3-based block resizing for Zen5+ servers
+ to older AVX2 fallback kernels
+
+---
+ kernel/setparam-ref.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/setparam-ref.c b/kernel/setparam-ref.c
+index 7db921b71..2ec0694c7 100644
+--- a/kernel/setparam-ref.c
++++ b/kernel/setparam-ref.c
+@@ -2108,7 +2108,8 @@ static void init_parameter(void) {
+ #ifdef EXPRECISION
+   TABLE_NAME.xgemm3m_p = TABLE_NAME.qgemm_p;
+ #endif
+-
++	
++#ifndef NO_AVX512
+ {
+     int l3_kb = get_l3_size();
+     int l2_kb = get_l2_size();
+@@ -2141,6 +2142,7 @@ static void init_parameter(void) {
+         }
+     }
+ }
++#endif
+ 
+ #if BUILD_SINGLE == 1
+   TABLE_NAME.sgemm_p = ((TABLE_NAME.sgemm_p + SGEMM_DEFAULT_UNROLL_M - 1)/SGEMM_DEFAULT_UNROLL_M) * SGEMM_DEFAULT_UNROLL_M;
+-- 
+2.55.0
+

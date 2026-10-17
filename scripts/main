@@ -15,6 +15,13 @@ fi
 export VERSION="0.3.34"
 export SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/releases/download/v${VERSION}/OpenBLAS-${VERSION}.tar.gz"
 export SOURCE_SHA256="cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
+# OpenBLAS 0.3.34 enlarges the GEMM blocks on AMD Zen 4 and Zen 5 servers in
+# every core table of a DYNAMIC_ARCH build, which overflows the stack of the
+# Haswell and Zen dgemm kernels (OpenMathLib/OpenBLAS#6013). The patches are the
+# upstream fixes a59a5c76 and a78196c5, which limit the change to the AVX-512
+# core tables.
+PATCH_DIR="$(abspath "patches/native")"
+export PATCH_DIR
 
 export CFLAGS="-w ${CFLAGS:-}"
 export CXXFLAGS="-w ${CXXFLAGS:-}"
@@ -158,6 +165,14 @@ for relapack in "0" "1"; do
 
       fetch_source "${SOURCE_URL}" "${SOURCE_SHA256}" "${build_dir}/OpenBLAS-${VERSION}.tar.gz" "${src_dir}"
 
+      # Fixes from OpenBLAS develop that the release lacks, as git format-patch
+      # files named after their upstream commits.
+      for patch_file in "${PATCH_DIR}"/*.patch; do
+        [[ -f "${patch_file}" ]] || continue # no patches
+        printf 'Applying %s\n' "${patch_file##*/}"
+        patch -d "${src_dir}" -p1 --forward --fuzz=0 <"${patch_file}"
+      done
+
       sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
       sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
 
@@ -291,6 +306,7 @@ for relapack in "0" "1"; do
           openblas "${VERSION}" \
           source "${SOURCE_URL}" \
           source_sha256 "${SOURCE_SHA256}" \
+          patches "$(cd "${PATCH_DIR}" && ls -- *.patch 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" \
           compiler "$(${CC#ccache } --version | head -1)"
       }
       popd >/dev/null
