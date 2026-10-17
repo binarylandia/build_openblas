@@ -13,7 +13,7 @@ if [[ "${CROSS_TARGET}" == "wasm32-unknown-emscripten" ]]; then
 fi
 
 export GIT_REPO_URL="https://github.com/OpenMathLib/OpenBLAS"
-export VERSION="0.3.28"
+export VERSION="0.3.34"
 export BRANCH="v${VERSION}"
 
 export CFLAGS="-w ${CFLAGS:-}"
@@ -75,6 +75,29 @@ function macho_split_members() {
     awk '$NF ~ /^\.L/ && $(NF-1) ~ /^[tT]$/ {split($1, a, ":"); print a[2]}' |
     sort -u)" || return
   comm -12 <(printf '%s\n' "${split}") <(printf '%s\n' "${labeled}")
+}
+
+# The cores of the arm64 DYNAMIC_CORE list of OpenBLAS 0.3.34 on Linux
+# (Makefile.system).
+ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX ARMV9SME THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
+
+# Fail when the archive lacks the dispatch table gotoblas_<core> of a core.
+function check_kernel_cores() {
+  local lib="${1}"
+  shift
+  local symbols
+  symbols="$("${NM:-nm}" --defined-only "${lib}" | awk '{print $NF}' | sed 's/^_//' | sort -u)" || return
+  local core
+  local missing=()
+  for core in "$@"; do
+    if ! grep -qx "gotoblas_${core}" <<<"${symbols}"; then
+      missing+=("${core}")
+    fi
+  done
+  if ((${#missing[@]} > 0)); then
+    printf 'ERROR: %s lacks the kernels of: %s\n' "${lib}" "${missing[*]}" >&2
+    return 1
+  fi
 }
 
 # Variants to build, named as in the archive names. All four by default; select
@@ -141,17 +164,6 @@ for relapack in "0" "1"; do
       sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
       sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
 
-      # OpenBLAS applies the DYNAMIC_LIST preprocessor defines (-DDYNAMIC_LIST,
-      # -DDYN_<core>) to CCOMMON_OPT for x86_64 only. The arm64 block computes
-      # them into XCCOMMON_OPT but never applies them, so dynamic_arm64.c is
-      # built in full-core mode and references kernels that DYNAMIC_LIST omitted
-      # from the build, breaking the link. Apply them for arm64 as x86_64 does.
-      if ! grep -qF 'CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST' "${src_dir}/Makefile.system"; then
-        sed -i '/^XCCOMMON_OPT = -DDYNAMIC_LIST -DDYN_ARMV8$/{n;a\
-CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
-}' "${src_dir}/Makefile.system"
-      fi
-
       # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
       # .subsections_via_symbols directive, which lets the linker split a section
       # into one piece per symbol. The kernels name their branch targets with .L
@@ -196,19 +208,17 @@ CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
           export TARGET="VORTEX"
           ;;
         aarch64*)
+          # DYNAMIC_ARCH builds every arm64 kernel of OpenBLAS, including the
+          # SVE and SME ones, which need the binutils 2.43 of the cross
+          # toolchain. ARMV8 is the runtime baseline for any other CPU.
           export TARGET="ARMV8"
-          # Restrict DYNAMIC_ARCH to kernels the cross toolchain's assembler
-          # (binutils 2.27) can build. It supports up to armv8.2-a, so the SVE
-          # and armv8.3-a+ kernels (THUNDERX3T110, NEOVERSEV1, NEOVERSEN2,
-          # A64FX, ARMV8SVE) fail to assemble under GCC 14.2. ARMV8 stays the
-          # runtime baseline for any CPU not in this list.
-          DYNAMIC_LIST="CORTEXA53 CORTEXA57 NEOVERSEN1 THUNDERX THUNDERX2T99 TSV110 EMAG8180"
-          export DYNAMIC_LIST
+          kernel_cores="${ARM64_LINUX_CORES}"
           ;;
         x86_64*)
           export TARGET="HASWELL"
           DYNAMIC_LIST="$(../../../scripts/get_x86_archs <"$build_dir/${src_dir}/TargetList.txt")"
           export DYNAMIC_LIST
+          kernel_cores="PRESCOTT ${DYNAMIC_LIST}"
           ;;
         esac
 
@@ -249,6 +259,14 @@ CCOMMON_OPT += $(XCCOMMON_OPT) # arm64 DYNAMIC_LIST
             printf 'ERROR: %s has objects with MH_SUBSECTIONS_VIA_SYMBOLS and .L symbols; the linker splits their functions:\n%s\n' "${install_dir}/lib/libopenblas.a" "${split_members}" >&2
             exit 1
           fi
+        fi
+
+        # Reject an archive without the kernels of a requested core. OpenBLAS
+        # can leave out a core without an error when its compiler checks fail
+        # (NO_SVE, NO_SME, NO_AVX512), and the dispatch then uses an older core.
+        if [[ ! "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+          read -ra cores <<<"${kernel_cores}"
+          check_kernel_cores "${install_dir}/lib/libopenblas.a" "${cores[@]}"
         fi
 
         package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
