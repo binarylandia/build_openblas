@@ -19,7 +19,8 @@ export SOURCE_SHA256="cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f1
 # every core table of a DYNAMIC_ARCH build, which overflows the stack of the
 # Haswell and Zen dgemm kernels (OpenMathLib/OpenBLAS#6013). The patches are the
 # upstream fixes a59a5c76 and a78196c5, which limit the change to the AVX-512
-# core tables.
+# core tables, and 0302a537, which declares the gotoblas_corename that a78196c5
+# calls.
 PATCH_DIR="$(abspath "patches/native")"
 export PATCH_DIR
 
