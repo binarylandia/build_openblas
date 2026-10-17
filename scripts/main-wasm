@@ -31,14 +31,19 @@ source "${BASH_SOURCE%/*}/lib.sh"
 
 : "${CROSS_TARGET:? "$0: \$CROSS_TARGET is not set"}"
 
-# The first develop commit whose C LAPACK functions take no hidden string
+# A develop commit whose C LAPACK functions and XERBLA take no hidden string
 # lengths and return void, as Rust's lapack-sys declares them (OpenMathLib/
-# OpenBLAS#6017). WebAssembly traps on a call whose signature differs from the
-# callee, so released versions do not work.
-COMMIT="eb00d5975cf5386412ade8ed95d691fe8b470c7f"
+# OpenBLAS#6017 and #6082). WebAssembly traps on a call whose signature differs
+# from the callee, so released versions up to 0.3.34 do not work.
+# COMMITS_AFTER_TAG counts the commits of COMMIT after BASE_TAG, so VERSION
+# reads like `git describe` (the develop branch still carries the version
+# string of the last release with a .dev suffix).
+COMMIT="de5d4914c558cf36cf67ee25ba78870e0e239265"
+BASE_TAG="v0.3.34"
+COMMITS_AFTER_TAG="432"
 SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/archive/${COMMIT}.tar.gz"
-SOURCE_SHA256="1de24958ef91c7c9c202efb6149d8f9db719650dfe5d12e30d5f5a89d2f4a022"
-VERSION="0.3.34.dev-${COMMIT:0:8}"
+SOURCE_SHA256="f3158e302ce82a0e813db977441ce03987dc0e6c4b3e6e30b5701aa4a10e8ecd"
+VERSION="${BASE_TAG#v}-${COMMITS_AFTER_TAG}-g${COMMIT:0:8}"
 NAME="openblas"
 PATCH_DIR="$(abspath "patches/${CROSS_TARGET}")"
 BUILD_DIR="$(abspath ".build")/${CROSS_TARGET}"
@@ -81,6 +86,7 @@ function fetch_source() {
   tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
   local patch_file
   for patch_file in "${PATCH_DIR}"/*.patch; do
+    [[ -f "${patch_file}" ]] || continue # no patches for this target
     printf 'Applying %s\n' "${patch_file##*/}"
     patch -d "${src_dir}" -p1 --forward --fuzz=0 <"${patch_file}"
   done

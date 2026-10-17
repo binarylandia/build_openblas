@@ -13,7 +13,7 @@ Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static lib
 
 ## WebAssembly
 
-The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=WASM128_GENERIC` (SIMD128 kernels), with LAPACK from the C translation that ships with OpenBLAS. It uses a develop commit of OpenBLAS whose LAPACK functions take no hidden string lengths and return `void`, plus the patches in `patches/wasm32-unknown-emscripten/`, because WebAssembly traps on a call whose signature differs from the callee.
+The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=WASM128_GENERIC` (SIMD128 kernels), with LAPACK from the C translation that ships with OpenBLAS. It uses a develop commit of OpenBLAS whose LAPACK functions and `xerbla` take no hidden string lengths and return `void`, plus the patches in `patches/wasm32-unknown-emscripten/` when that directory has any, because WebAssembly traps on a call whose signature differs from the callee. The archive version names the commit as `git describe` does: `0.3.34-432-gde5d4914` is the 432nd commit after `v0.3.34`.
 
 - **plain**: Single-threaded
 - **mt**: For modules with threads (`-pthread`). Every object is compiled with atomics, which `wasm-ld` requires for shared memory, and `USE_LOCKING=1` locks the work buffers, so threads can call BLAS at the same time. OpenBLAS's own thread pool stays off
