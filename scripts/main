@@ -164,6 +164,23 @@ for relapack in "0" "1"; do
       sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
       sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
 
+      # dynamic_arm64.c detects SME with getauxval(AT_HWCAP2), but the headers of
+      # glibc older than 2.18 do not define AT_HWCAP2, so the aarch64 glibc 2.17
+      # build fails to compile it. Define it as the file already does for the
+      # HWCAP bits; 26 is the value of the Linux auxiliary vector ABI, and
+      # getauxval returns 0 for it on a kernel that does not provide it.
+      if ! grep -q '^#define AT_HWCAP2 ' "${src_dir}/driver/others/dynamic_arm64.c"; then
+        sed -i '/^#define HWCAP2_SME 1<<23$/{n;a\
+#ifndef AT_HWCAP2\
+#define AT_HWCAP2 26\
+#endif
+}' "${src_dir}/driver/others/dynamic_arm64.c"
+      fi
+      if ! grep -q '^#define AT_HWCAP2 26$' "${src_dir}/driver/others/dynamic_arm64.c"; then
+        printf 'ERROR: %s does not define AT_HWCAP2; update the patch for this OpenBLAS version.\n' "${src_dir}/driver/others/dynamic_arm64.c" >&2
+        exit 1
+      fi
+
       # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
       # .subsections_via_symbols directive, which lets the linker split a section
       # into one piece per symbol. The kernels name their branch targets with .L
