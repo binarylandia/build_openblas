@@ -24,6 +24,25 @@ Emscripten has no ABI guarantee between versions, so an archive links only with 
 CROSS_TARGET=wasm32-unknown-emscripten ./build
 ```
 
+## Building and releasing
+
+```bash
+# Native targets into .out/<build time>/, with one metadata file per archive
+BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')" ./build-all
+# WebAssembly, with its own build time
+CROSS_TARGET=wasm32-unknown-emscripten ./build
+
+# Check, then publish one build time as a release
+./scripts/release --dry-run <build time>
+./scripts/release <build time>
+```
+
+- Native archives become release `openblas-<version>-<build time>`, WebAssembly archives `openblas-<version>-emscripten-<Emscripten version>-<build time>`
+- The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The distribution packages of the images (yum, apt) come from their mirrors and are not pinned
+- Archives list their files in sorted order with one owner and the commit time, so the same files give the same archive
+- `scripts/release` publishes only a build of a clean, pushed commit, and never changes a published release
+- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version, source and sha256, compiler, build image file and sha256, and build commit
+
 ## Features
 
 - Static library with position-independent code (-fPIC)

@@ -12,9 +12,9 @@ if [[ "${CROSS_TARGET}" == "wasm32-unknown-emscripten" ]]; then
   exec "${BASH_SOURCE%/*}/main-wasm"
 fi
 
-export GIT_REPO_URL="https://github.com/OpenMathLib/OpenBLAS"
 export VERSION="0.3.34"
-export BRANCH="v${VERSION}"
+export SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/releases/download/v${VERSION}/OpenBLAS-${VERSION}.tar.gz"
+export SOURCE_SHA256="cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
 
 export CFLAGS="-w ${CFLAGS:-}"
 export CXXFLAGS="-w ${CXXFLAGS:-}"
@@ -156,10 +156,7 @@ for relapack in "0" "1"; do
     {
       src_dir="${NAME}-${VERSION}"
 
-      if [ ! -d "${src_dir}" ]; then
-        git config --global advice.detachedHead false
-        git clone --recursive --depth=1 -b "${BRANCH}" "${GIT_REPO_URL}" "${src_dir}" 2>&1 | ../../scripts/no_noise
-      fi
+      fetch_source "${SOURCE_URL}" "${SOURCE_SHA256}" "${build_dir}/OpenBLAS-${VERSION}.tar.gz" "${src_dir}"
 
       sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
       sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
@@ -286,7 +283,15 @@ for relapack in "0" "1"; do
           check_kernel_cores "${install_dir}/lib/libopenblas.a" "${cores[@]}"
         fi
 
-        package "${install_dir}" "${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
+        archive="${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
+        package "${install_dir}" "${archive}"
+        write_metadata "${archive}" \
+          kind native \
+          variant "${variant}" \
+          openblas "${VERSION}" \
+          source "${SOURCE_URL}" \
+          source_sha256 "${SOURCE_SHA256}" \
+          compiler "$(${CC#ccache } --version | head -1)"
       }
       popd >/dev/null
     }

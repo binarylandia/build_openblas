@@ -17,6 +17,7 @@ RUN set -euxo pipefail >/dev/null \
   curl \
   file \
   gcc \
+  jq \
   libc6-dev \
   make \
   patch \

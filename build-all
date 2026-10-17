@@ -18,7 +18,9 @@ targets=(
   "x86_64-unknown-linux-musl"
 )
 
-export BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')"
+# One build time for all targets, so scripts/release publishes them together.
+BUILD_TIME="${BUILD_TIME:-$(date -u '+%Y-%m-%d_%H-%M-%S')}"
+export BUILD_TIME
 
 function run_one() {
   local target=${1:?}
@@ -27,5 +29,7 @@ function run_one() {
 }
 export -f run_one
 
-parallel --line-buffer --tag --tagstring '|{#}| \033[34m{= sprintf("%-26s", $_) =}\033[0m' --jobs="${#targets[@]}" \
+# Each target build uses every CPU, so JOBS targets build at a time; more at once
+# can run out of memory.
+parallel --halt soon,fail=1 --line-buffer --tag --tagstring '|{#}| \033[34m{= sprintf("%-26s", $_) =}\033[0m' --jobs="${JOBS:-4}" \
   run_one ::: "${targets[@]}"

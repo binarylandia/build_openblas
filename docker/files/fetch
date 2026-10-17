@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Usage: $0 <url> <sha256> <output file>
+#
+# Download a file and fail unless its sha256 is the given one.
+#
+set -euo pipefail
+
+url="${1:?url}"
+expected="${2:?sha256}"
+out="${3:?output file}"
+
+curl -fsSLo "${out}" --retry 3 "${url}"
+actual="$(sha256sum "${out}" | cut -d' ' -f1)"
+if [[ "${actual}" != "${expected}" ]]; then
+  rm -f "${out}"
+  printf 'ERROR: checksum mismatch for %s: expected %s, got %s\n' "${url}" "${expected}" "${actual}" >&2
+  exit 1
+fi

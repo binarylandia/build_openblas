@@ -1,6 +1,8 @@
-FROM quay.io/pypa/manylinux2014_x86_64:2024.10.19-1
+FROM quay.io/pypa/manylinux2014_x86_64:2024.10.19-1@sha256:2d03fb51340fbbc5732c7251eedc2ac015c96a16ed91f818ea500e5b2099da96
 
 SHELL ["bash", "-euxo", "pipefail", "-c"]
+
+COPY docker/files/fetch /usr/local/bin/fetch
 
 RUN set -euxo pipefail >/dev/null \
 && sed -i "s/enabled=1/enabled=0/g" "/etc/yum/pluginconf.d/fastestmirror.conf" \
@@ -18,6 +20,7 @@ RUN set -euxo pipefail >/dev/null \
   ca-certificates \
   curl \
   git \
+  jq \
   make \
   parallel \
   sudo \
@@ -31,12 +34,16 @@ ENV CCACHE_DIR="/cache/ccache"
 ENV CCACHE_NOCOMPRESS="1"
 ENV CCACHE_MAXSIZE="50G"
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz" | tar --strip-components=1 -C "/usr/bin" -xJ "ccache-4.10.2-linux-x86_64/ccache" \
+&& fetch "https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz" "80cab87bd510eca796467aee8e663c398239e0df1c4800a0b5dff11dca0b4f18" /tmp/download \
+&& tar --strip-components=1 -C "/usr/bin" -xJf /tmp/download "ccache-4.10.2-linux-x86_64/ccache" \
+&& rm /tmp/download \
 && which ccache \
 && ccache --version
 
 RUN set -euxo pipefail >/dev/null \
-&& curl -fsSL "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" | tar -C "/usr" -xJ \
+&& fetch "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" "7695cb4c68fa2e703bca4d0e5ea7bce3f6fc8ac2db507279d02818e3bd704bcc" /tmp/download \
+&& tar -C "/usr" -xJf /tmp/download \
+&& rm /tmp/download \
 && ls /usr/bin/gcc \
 && gcc -v \
 && ls /usr/bin/gcc-ar \

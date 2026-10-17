@@ -5,10 +5,24 @@ set -euo pipefail
 export BUILDKIT_PROGRESS=plain
 export PROGRESS_NO_TRUNC=1
 
-source ".env"
-
-CROSS_TARGET="${CROSS_TARGET:-native}"
+CROSS_TARGET="${CROSS_TARGET:?CROSS_TARGET names the target, for example CROSS_TARGET=x86_64-unknown-linux-gnu}"
+DOCKERFILE="./dev/${CROSS_TARGET}.dockerfile"
+[[ -f "${DOCKERFILE}" ]] || {
+  printf 'ERROR: no build image for %s: %s does not exist\n' "${CROSS_TARGET}" "${DOCKERFILE}" >&2
+  exit 1
+}
 BUILD_TIME="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
+
+# The commit that the build runs, recorded in the metadata of each archive.
+# scripts/release publishes only archives of a clean, pushed commit.
+BUILD_COMMIT="$(git rev-parse HEAD)"
+BUILD_DIRTY="false"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  BUILD_DIRTY="true"
+fi
+# The time of the commit, used as the time of every archive entry.
+SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+DOCKERFILE_SHA256="$(sha256sum "${DOCKERFILE}" | cut -d' ' -f1)"
 DOCKER_REPO="openblas_builder"
 DOCKER_IMAGE_NAME_SAFE="${DOCKER_REPO//\//-}-${CROSS_TARGET}"
 DOCKER_CONTAINER_NAME="${DOCKER_IMAGE_NAME_SAFE}-$(date -u "+%Y-%m-%d_%H-%M-%S_%3NZ")"
@@ -17,7 +31,7 @@ USER="user"
 GROUP="user"
 
 docker build \
-  --file="./dev/${CROSS_TARGET}.dockerfile" \
+  --file="${DOCKERFILE}" \
   --tag="$DOCKER_IMAGE_NAME_SAFE" \
   --network=host \
   --build-arg="UID=$(id -u)" \
@@ -28,7 +42,12 @@ docker build \
 
 mkdir -p .build .cache/ccache .opt .out
 
-docker run --rm $(tty -s && echo "-it") \
+tty_flags=()
+if tty -s; then
+  tty_flags=(--interactive --tty)
+fi
+
+docker run --rm "${tty_flags[@]}" \
   --init \
   --name="$DOCKER_CONTAINER_NAME" \
   --hostname="${DOCKER_IMAGE_NAME_SAFE}" \
@@ -39,6 +58,10 @@ docker run --rm $(tty -s && echo "-it") \
   --workdir="/workdir" \
   --env="CROSS_TARGET=${CROSS_TARGET}" \
   --env="BUILD_TIME=${BUILD_TIME}" \
+  --env="BUILD_COMMIT=${BUILD_COMMIT}" \
+  --env="BUILD_DIRTY=${BUILD_DIRTY}" \
+  --env="SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
+  --env="DOCKERFILE_SHA256=${DOCKERFILE_SHA256}" \
   --env="UID=$(id -u)" \
   --env="GID=$(id -g)" \
   --env="USER=${USER}" \

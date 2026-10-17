@@ -67,23 +67,9 @@ em_version="$(<"${em_root}/emscripten-version.txt")"
 em_version="${em_version%-git}"
 
 # Unpack the pinned source into a new directory and apply the patches.
-function fetch_source() {
+function fetch_patched_source() {
   local src_dir="${1}"
-  local tarball="${BUILD_DIR}/${COMMIT}.tar.gz"
-  if [[ ! -f "${tarball}" ]]; then
-    curl -fsSL --retry 3 -o "${tarball}.part" "${SOURCE_URL}"
-    mv "${tarball}.part" "${tarball}"
-  fi
-  local actual
-  actual="$(sha256sum "${tarball}" | cut -d' ' -f1)"
-  if [[ "${actual}" != "${SOURCE_SHA256}" ]]; then
-    rm -f "${tarball}"
-    printf 'ERROR: checksum mismatch for %s: expected %s, got %s\n' "${SOURCE_URL}" "${SOURCE_SHA256}" "${actual}" >&2
-    return 1
-  fi
-  rm -rf "${src_dir}"
-  mkdir -p "${src_dir}"
-  tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
+  fetch_source "${SOURCE_URL}" "${SOURCE_SHA256}" "${BUILD_DIR}/${COMMIT}.tar.gz" "${src_dir}"
   local patch_file
   for patch_file in "${PATCH_DIR}"/*.patch; do
     [[ -f "${patch_file}" ]] || continue # no patches for this target
@@ -186,7 +172,7 @@ for variant in ${VARIANTS}; do
   mkdir -p "${build_dir}" "${OUT_DIR}/${build_time}"
   rm -rf "${install_dir}"
 
-  fetch_source "${src_dir}"
+  fetch_patched_source "${src_dir}"
 
   EMCC_CFLAGS="${emcc_cflags}" ${NICE} make -C "${src_dir}" -j"$(nproc)" libs netlib "${make_vars[@]}" >"${build_log}" 2>&1 || {
     tail -50 "${build_log}" >&2
@@ -210,6 +196,15 @@ for variant in ${VARIANTS}; do
   check_link "${lib}" "${build_dir}/check" "${link_flags[@]}"
 
   install -D -m 0644 "${em_root}/emscripten-version.txt" "${install_dir}/share/${NAME}/emscripten-version.txt"
-  package "${install_dir}" "${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+  archive="${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+  package "${install_dir}" "${archive}"
+  write_metadata "${archive}" \
+    kind wasm \
+    variant "${variant}" \
+    openblas "${VERSION}" \
+    source "${SOURCE_URL}" \
+    source_sha256 "${SOURCE_SHA256}" \
+    emscripten "${em_version}" \
+    compiler "$(emcc --version | head -1)"
   printf 'Built %s\n' "${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
 done
