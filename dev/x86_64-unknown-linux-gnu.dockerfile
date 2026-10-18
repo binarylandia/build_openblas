@@ -65,12 +65,15 @@ RUN set -euxo pipefail >/dev/null \
 && "${LLVM_DIR}/bin/flang" --version
 
 ENV TRIPLET="x86_64-unknown-linux-gnu"
-ENV GCC_VERSION="14.4.0"
-ENV GCC_RELEASE="gcc-${GCC_VERSION}-2026-10-18_01-15-48"
+# The GCC cross toolchain of crosstool-NG: the sysroot, crt files, libgcc, and
+# libstdc++ headers of the target.
+ENV GCC_VERSION="16.2.0"
 ENV GCC_DIR="/opt/gcc"
+ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_crosstool-ng/releases/download/gcc-15.3.0_16.2.0-2026-10-18_08-33-54/gcc-16.2.0-x86_64-unknown-linux-gnu-2026-10-18_08-33-54.tar.xz"
+ENV TARGET_TOOLCHAIN_SHA256="db20b5651bc60966e834be43ada16ef361afbc8686025f8d3def5404ccac9ea3"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \
-&& fetch "https://github.com/binarylandia/build_crosstool-ng/releases/download/${GCC_RELEASE}/gcc-${GCC_VERSION}-${TRIPLET}-2026-10-18_01-15-48.tar.xz" "c626e1527cde422062b97b6556d47c2e99085cca8867a54f531e2b145a68d0a4" /tmp/download \
+&& fetch "${TARGET_TOOLCHAIN_URL}" "${TARGET_TOOLCHAIN_SHA256}" /tmp/download \
 && tar -C "${GCC_DIR}" -xJf /tmp/download \
 && rm /tmp/download \
 && ${GCC_DIR}/bin/${TRIPLET}-gcc -v

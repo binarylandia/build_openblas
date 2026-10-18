@@ -16,9 +16,10 @@
 #     pushed to origin
 #   - carries the archives, SHA256SUMS, and manifest.json with the metadata of
 #     every archive (target, variant, OpenBLAS version and commit, source and its
-#     sha256, compilers, LLVM and GCC releases of the native toolchains, the
-#     flang runtime in the archive, the files in the archive, build image file
-#     and its sha256, build commit)
+#     sha256, compilers, the LLVM release and the target toolchain (GCC,
+#     osxcross, or llvm-mingw) of native archives, the flang runtime in the
+#     archive, the files in the archive, build image file and its sha256, build
+#     commit)
 #
 # A published release is never changed: the script stops when the release
 # exists. A fixed archive goes into a new release.

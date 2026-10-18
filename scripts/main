@@ -430,7 +430,8 @@ function variant_metadata() {
     --arg llvm "${LLVM_RELEASE:?}" \
     --arg llvm_source "${LLVM_SOURCE:?}" \
     --arg llvm_source_sha256 "${LLVM_SOURCE_SHA256:?}" \
-    --arg gcc "${GCC_RELEASE:?}" \
+    --arg target_toolchain "${TARGET_TOOLCHAIN_URL:?}" \
+    --arg target_toolchain_sha256 "${TARGET_TOOLCHAIN_SHA256:?}" \
     --arg flang_rt_sha256 "$(sha256sum "${install_dir}/lib/libflang_rt.runtime.a" | cut -d' ' -f1)" \
     --argjson contents "${contents}" \
     '{
@@ -443,7 +444,10 @@ function variant_metadata() {
       compiler: $compiler,
       fortran_compiler: $fortran_compiler,
       llvm: $llvm,
-      gcc: $gcc,
+      target_toolchain: {
+        url: $target_toolchain,
+        sha256: $target_toolchain_sha256
+      },
       flang_rt: {
         file: "lib/libflang_rt.runtime.a",
         sha256: $flang_rt_sha256,
