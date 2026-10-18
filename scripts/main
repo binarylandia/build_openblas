@@ -435,7 +435,12 @@ function build_variant() {
   # -defaultlib:advapi32 of the MSVC linker, which the MinGW drivers of clang
   # and flang reject. -ladvapi32 names the same library for them.
   if [[ "${CROSS_TARGET}" == *-windows-* ]]; then
-    make_vars+=(CONSISTENT_FPCSR=1 EXTRALIB=-ladvapi32)
+    make_vars+=(EXTRALIB=-ladvapi32)
+  fi
+  # CONSISTENT_FPCSR gives the threads of the Windows thread server the x87
+  # and SSE control words of the calling thread, with x86 instructions.
+  if [[ "${CROSS_TARGET}" == x86_64-*-windows-* ]]; then
+    make_vars+=(CONSISTENT_FPCSR=1)
   fi
   # OpenBLAS reads the Xcode version with pkgutil, which only macOS has, to
   # select options of the linker of Xcode. The build links with ld64.lld.
