@@ -50,6 +50,11 @@ build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 export CFLAGS="-w -fPIC ${CFLAGS:-}"
 export FFLAGS="-w -fPIC ${FFLAGS:-}"
 export LDFLAGS="-fPIC ${LDFLAGS:-}"
+if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+  export CFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${CFLAGS}"
+  export FFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${FFLAGS}"
+  export LDFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${LDFLAGS}"
+fi
 
 export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
@@ -347,23 +352,18 @@ function build_variant() {
     ;;
   esac
   # NO_SME leaves out the ARMV9SME core, and SME CPUs use the kernels of their
-  # SVE or Neoverse N1 core. Its single-precision direct kernels (SGEMM, SSYMM, SSYRK,
-  # SSYR2K, STRMM) return without computing when GCC compiles them
-  # (OpenMathLib/OpenBLAS#6099). Compiled by clang, its GEMM kernels compute
-  # correct dgemm and sgemm results only with a streaming vector length of 512
-  # bits, as on Apple M4, and wrong ones with 128, 256, 1024, and 2048 bits,
-  # while the dispatch selects the core on any CPU with SME.
+  # SVE or Neoverse N1 core. The single-precision direct kernels of ARMV9SME
+  # (SGEMM, SSYMM, SSYRK, SSYR2K, STRMM) return without computing when GCC
+  # compiles them (OpenMathLib/OpenBLAS#6099). Compiled by clang, its GEMM
+  # kernels compute correct dgemm and sgemm results only with a streaming
+  # vector length of 512 bits, as on Apple M4, and wrong ones with 128, 256,
+  # 1024, and 2048 bits, while the dispatch selects the core on any CPU with
+  # SME.
   if [[ "${CROSS_TARGET}" == aarch64* ]]; then
     make_vars+=(NO_SME=1)
   fi
   if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
     make_vars+=(CONSISTENT_FPCSR=1)
-  fi
-  if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
-    local apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-    export CFLAGS="${apple_common} ${CFLAGS}"
-    export FFLAGS="${apple_common} ${FFLAGS}"
-    export LDFLAGS="${apple_common} ${LDFLAGS}"
   fi
 
   # The library targets only: the default target also links the test programs,
