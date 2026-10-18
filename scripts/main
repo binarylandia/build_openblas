@@ -126,6 +126,19 @@ function prepare_source() {
     -e 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' \
     "${src_dir}/relapack/Makefile"
 
+  # RELAPACK_REPLACE=1 also puts the recursive GEMMT of ReLAPACK, which its LDL
+  # factorizations use, under the BLAS names sgemmt_, dgemmt_, cgemmt_, and
+  # zgemmt_, in place of the GEMMT of OpenBLAS. It fails the GEMMT unit tests
+  # of OpenBLAS: other argument errors, and wrong cgemmt and zgemmt results
+  # when both operands are conjugate-transposed. INCLUDE_XGEMMT 0 keeps it
+  # inside ReLAPACK.
+  local relapack_config="${src_dir}/relapack/relapack_config.h"
+  sed -i 's|^#define INCLUDE_XGEMMT INCLUDE_ALL$|#define INCLUDE_XGEMMT 0|' "${relapack_config}"
+  if ! grep -q '^#define INCLUDE_XGEMMT 0$' "${relapack_config}"; then
+    printf 'ERROR: %s does not set INCLUDE_XGEMMT; update the edit for this OpenBLAS version.\n' "${relapack_config}" >&2
+    return 1
+  fi
+
   # dynamic_arm64.c detects SME with getauxval(AT_HWCAP2), but the headers of
   # glibc older than 2.18 do not define AT_HWCAP2, so the aarch64 glibc 2.17
   # build fails to compile it. Define it as the file already does for the HWCAP
