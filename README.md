@@ -2,7 +2,9 @@
 
 ## [Releases](https://github.com/binarylandia/build_openblas/releases)
 
-Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static libraries with LAPACK support for Linux, macOS, and Windows targets. Includes variants with threading and ReLAPACK optimizations.
+Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static libraries with LAPACK support for Linux, macOS, Windows, and WebAssembly targets. Includes variants with threading and ReLAPACK optimizations.
+
+Every target builds the same OpenBLAS source: develop commit `de5d4914`, the 432nd commit after `v0.3.34`, which the archive version names as `git describe` does (`0.3.34-432-gde5d4914`). It has the fixes for the dgemm stack overflow on AMD Zen 4 and Zen 5 servers that `v0.3.34` lacks, and C LAPACK functions and an `xerbla` that take no hidden string lengths and return `void`, which WebAssembly needs.
 
 ## Variants
 
@@ -11,9 +13,30 @@ Cross-compiles [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) as static lib
 - **relapack**: ReLAPACK recursive algorithms
 - **threads-relapack**: Multi-threaded with ReLAPACK
 
+## Linux targets
+
+`x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, and `aarch64-unknown-linux-musl` build with clang and flang of LLVM 22.1.8 ([binarylandia/build_llvm](https://github.com/binarylandia/build_llvm)), on the sysroots and GCC runtimes of the crosstool-NG GCC 14.4.0 toolchains ([binarylandia/build_crosstool-ng](https://github.com/binarylandia/build_crosstool-ng)), with glibc 2.17 on the gnu targets. The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`).
+
+An archive holds:
+
+- `lib/libopenblas.a`: BLAS, CBLAS, LAPACK, and LAPACKE, with the kernels of every CPU of the architecture (`DYNAMIC_ARCH`)
+- `lib/libflang_rt.runtime.a`: the Fortran runtime of the flang that compiled LAPACK, static and position-independent, with its license in `share/doc/flang-rt/LICENSE.TXT`
+- headers, and pkg-config and CMake files that name both libraries
+
+A program links both archives, for example `cc main.c libopenblas.a libflang_rt.runtime.a -lm -lpthread`, and then needs only the C library of the target: glibc 2.17 on gnu targets, nothing on musl targets when it links statically. The archives need no C++ runtime and no unwinder. They call the compiler support routines of libgcc or compiler-rt (128-bit integer and floating-point arithmetic, complex multiplication and division, aarch64 atomics), which C compilers link by default.
+
+Every build checks each archive:
+
+- the kernels of every core of `DYNAMIC_ARCH` are present
+- `libopenblas.a` calls no gfortran runtime, `libflang_rt.runtime.a` defines every Fortran runtime function that it calls, and neither archive needs a C++ runtime
+- a C program (`scripts/consumer-check.c`) that calls `dgemm_`, `sgemm_`, `dsyev_`, `dgttrf_`, and `dgttrs_` links both archives, needs no shared library beyond glibc 2.17 (gnu) or none (musl), and computes the known results: natively on x86_64, and under `qemu-aarch64` on aarch64, there once with the detected core and once with each core forced through `OPENBLAS_CORETYPE`
+- the OpenBLAS tests pass (`make tests`: the BLAS, CBLAS, and unit tests). On aarch64 they run through the `qemu-aarch64` binfmt_misc handler of the build machine, which must be registered
+
+The macOS and Windows images still carry GCC toolchains, and `scripts/main` builds only targets whose image provides clang, flang, and flang-rt.
+
 ## WebAssembly
 
-The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=WASM128_GENERIC` (SIMD128 kernels), with LAPACK from the C translation that ships with OpenBLAS. It uses a develop commit of OpenBLAS whose LAPACK functions and `xerbla` take no hidden string lengths and return `void`, plus the patches in `patches/wasm32-unknown-emscripten/` when that directory has any, because WebAssembly traps on a call whose signature differs from the callee. The archive version names the commit as `git describe` does: `0.3.34-432-gde5d4914` is the 432nd commit after `v0.3.34`.
+The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=WASM128_GENERIC` (SIMD128 kernels), with LAPACK from the C translation that ships with OpenBLAS, plus the patches in `patches/wasm32-unknown-emscripten/` when that directory has any. WebAssembly traps on a call whose signature differs from the callee, so the LAPACK functions and `xerbla` must take no hidden string lengths and return `void`.
 
 - **plain**: Single-threaded
 - **mt**: For modules with threads (`-pthread`). Every object is compiled with atomics, which `wasm-ld` requires for shared memory, and `USE_LOCKING=1` locks the work buffers, so threads can call BLAS at the same time. OpenBLAS's own thread pool stays off
@@ -27,8 +50,11 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 ## Building and releasing
 
 ```bash
-# Native targets into .out/<build time>/, with one metadata file per archive
+# Linux targets into .out/<build time>/, with one metadata file per archive
 BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')" ./build-all
+# One target, or some variants of it
+CROSS_TARGET=aarch64-unknown-linux-gnu ./build
+CROSS_TARGET=aarch64-unknown-linux-gnu ./build 'VARIANTS="plain threads" ./scripts/main'
 # WebAssembly, with its own build time
 CROSS_TARGET=wasm32-unknown-emscripten ./build
 
@@ -41,7 +67,7 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 - The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The distribution packages of the images (yum, apt) come from their mirrors and are not pinned
 - Archives list their files in sorted order with one owner and the commit time, so the same files give the same archive
 - `scripts/release` publishes only a build of a clean, pushed commit, and never changes a published release
-- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version, source and sha256, compiler, build image file and sha256, and build commit
+- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version and commit, source and sha256, compilers, LLVM and GCC toolchain releases, flang-rt file and sha256, the files in the archive, build image file and sha256, and build commit
 
 ## Features
 

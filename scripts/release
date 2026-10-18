@@ -15,8 +15,10 @@
 #   - points at the commit that built the archives, which must be clean and
 #     pushed to origin
 #   - carries the archives, SHA256SUMS, and manifest.json with the metadata of
-#     every archive (target, variant, OpenBLAS version, source and its sha256,
-#     compiler, build image file and its sha256, build commit)
+#     every archive (target, variant, OpenBLAS version and commit, source and its
+#     sha256, compilers, LLVM and GCC releases of the native toolchains, the
+#     flang runtime in the archive, the files in the archive, build image file
+#     and its sha256, build commit)
 #
 # A published release is never changed: the script stops when the release
 # exists. A fixed archive goes into a new release.
@@ -89,9 +91,9 @@ function write_notes() {
     fi
     jq -r '
       "Static OpenBLAS \(.archives[0].openblas) built from \(.archives[0].source) (sha256 `\(.archives[0].source_sha256)`) by commit \(.commit[0:12]) of this repository.\n",
-      "| Target | Variant | Compiler |",
-      "| --- | --- | --- |",
-      (.archives[] | "| `\(.target)` | \(.variant) | \(.compiler) |"),
+      "| Target | Variant | Compiler | Fortran compiler |",
+      "| --- | --- | --- | --- |",
+      (.archives[] | "| `\(.target)` | \(.variant) | \(.compiler) | \(.fortran_compiler // "none") |"),
       "\n`SHA256SUMS` lists the checksums of the archives, and `manifest.json` the metadata of every archive."
     ' "${manifest}"
   } >"${notes}"

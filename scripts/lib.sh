@@ -2,8 +2,25 @@
 #
 # Helpers shared by scripts/main and scripts/main-wasm.
 #
+# shellcheck shell=bash disable=SC2034 # the sourcing scripts use the constants
 
 export NICE="nice -19 ionice -c2 -n5"
+
+# The OpenBLAS source of every target: a develop commit after 0.3.34. Its C
+# LAPACK functions and XERBLA take no hidden string lengths and return void, as
+# Rust's lapack-sys declares them (OpenMathLib/OpenBLAS#6017 and #6082), which
+# WebAssembly needs because it traps on a call whose signature differs from the
+# callee. It also has the fixes for the dgemm stack overflow on AMD Zen 4 and
+# Zen 5 servers (OpenMathLib/OpenBLAS#6013) that 0.3.34 lacks.
+# OPENBLAS_COMMITS_AFTER_TAG counts the commits of the commit after the tag, so
+# OPENBLAS_VERSION reads like `git describe` (the develop branch still carries
+# the version string of the last release with a .dev suffix).
+OPENBLAS_COMMIT="de5d4914c558cf36cf67ee25ba78870e0e239265"
+OPENBLAS_BASE_TAG="v0.3.34"
+OPENBLAS_COMMITS_AFTER_TAG="432"
+OPENBLAS_SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/archive/${OPENBLAS_COMMIT}.tar.gz"
+OPENBLAS_SOURCE_SHA256="f3158e302ce82a0e813db977441ce03987dc0e6c4b3e6e30b5701aa4a10e8ecd"
+OPENBLAS_VERSION="${OPENBLAS_BASE_TAG#v}-${OPENBLAS_COMMITS_AFTER_TAG}-g${OPENBLAS_COMMIT:0:8}"
 
 function abspath() {
   readlink -m "$1"
@@ -55,19 +72,15 @@ function fetch_source() {
   tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
 }
 
-# Write <archive>.json next to an archive: the given key-value pairs and the
+# Write <archive>.json next to an archive: the fields of a JSON object and the
 # build provenance that ./build passes in. scripts/release puts these files into
 # the manifest of a release.
 function write_metadata() {
   local archive="${1}"
-  shift
-  local named=()
-  while (($# > 0)); do
-    named+=(--arg "${1}" "${2}")
-    shift 2
-  done
+  local fields="${2}"
   local file="${archive##*/}"
-  jq -n "${named[@]}" \
+  jq -n \
+    --argjson fields "${fields}" \
     --arg name "${file%.tar.xz}" \
     --arg target "${CROSS_TARGET:?}" \
     --arg dockerfile "dev/${CROSS_TARGET}.dockerfile" \
@@ -76,6 +89,15 @@ function write_metadata() {
     --arg build_dirty "${BUILD_DIRTY:?}" \
     --arg build_time "${build_time:?}" \
     --arg file "${file}" \
-    '$ARGS.named | .build_dirty = (.build_dirty == "true") | .files = [.file] | del(.file)' \
+    '$fields + {
+      name: $name,
+      target: $target,
+      dockerfile: $dockerfile,
+      dockerfile_sha256: $dockerfile_sha256,
+      build_commit: $build_commit,
+      build_dirty: ($build_dirty == "true"),
+      build_time: $build_time,
+      files: [$file]
+    }' \
     >"${archive%.tar.xz}.json"
 }

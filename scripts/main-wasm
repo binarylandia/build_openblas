@@ -31,19 +31,6 @@ source "${BASH_SOURCE%/*}/lib.sh"
 
 : "${CROSS_TARGET:? "$0: \$CROSS_TARGET is not set"}"
 
-# A develop commit whose C LAPACK functions and XERBLA take no hidden string
-# lengths and return void, as Rust's lapack-sys declares them (OpenMathLib/
-# OpenBLAS#6017 and #6082). WebAssembly traps on a call whose signature differs
-# from the callee, so released versions up to 0.3.34 do not work.
-# COMMITS_AFTER_TAG counts the commits of COMMIT after BASE_TAG, so VERSION
-# reads like `git describe` (the develop branch still carries the version
-# string of the last release with a .dev suffix).
-COMMIT="de5d4914c558cf36cf67ee25ba78870e0e239265"
-BASE_TAG="v0.3.34"
-COMMITS_AFTER_TAG="432"
-SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/archive/${COMMIT}.tar.gz"
-SOURCE_SHA256="f3158e302ce82a0e813db977441ce03987dc0e6c4b3e6e30b5701aa4a10e8ecd"
-VERSION="${BASE_TAG#v}-${COMMITS_AFTER_TAG}-g${COMMIT:0:8}"
 NAME="openblas"
 PATCH_DIR="$(abspath "patches/${CROSS_TARGET}")"
 BUILD_DIR="$(abspath ".build")/${CROSS_TARGET}"
@@ -69,7 +56,7 @@ em_version="${em_version%-git}"
 # Unpack the pinned source into a new directory and apply the patches.
 function fetch_patched_source() {
   local src_dir="${1}"
-  fetch_source "${SOURCE_URL}" "${SOURCE_SHA256}" "${BUILD_DIR}/${COMMIT}.tar.gz" "${src_dir}"
+  fetch_source "${OPENBLAS_SOURCE_URL}" "${OPENBLAS_SOURCE_SHA256}" "${BUILD_DIR}/${OPENBLAS_COMMIT}.tar.gz" "${src_dir}"
   local patch_file
   for patch_file in "${PATCH_DIR}"/*.patch; do
     [[ -f "${patch_file}" ]] || continue # no patches for this target
@@ -196,15 +183,16 @@ for variant in ${VARIANTS}; do
   check_link "${lib}" "${build_dir}/check" "${link_flags[@]}"
 
   install -D -m 0644 "${em_root}/emscripten-version.txt" "${install_dir}/share/${NAME}/emscripten-version.txt"
-  archive="${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+  archive="${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
   package "${install_dir}" "${archive}"
-  write_metadata "${archive}" \
-    kind wasm \
-    variant "${variant}" \
-    openblas "${VERSION}" \
-    source "${SOURCE_URL}" \
-    source_sha256 "${SOURCE_SHA256}" \
-    emscripten "${em_version}" \
-    compiler "$(emcc --version | head -1)"
-  printf 'Built %s\n' "${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
+  write_metadata "${archive}" "$(jq -n \
+    --arg variant "${variant}" \
+    --arg openblas "${OPENBLAS_VERSION}" \
+    --arg openblas_commit "${OPENBLAS_COMMIT}" \
+    --arg source "${OPENBLAS_SOURCE_URL}" \
+    --arg source_sha256 "${OPENBLAS_SOURCE_SHA256}" \
+    --arg emscripten "${em_version}" \
+    --arg compiler "$(emcc --version | head -1)" \
+    '{kind: "wasm", variant: $variant, openblas: $openblas, openblas_commit: $openblas_commit, source: $source, source_sha256: $source_sha256, emscripten: $emscripten, compiler: $compiler}')"
+  printf 'Built %s\n' "${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
 done

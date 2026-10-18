@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# Usage: $0 <LLVM source tarball> <target triple>
+#
+# Build the LLVM runtimes that clang and flang need to link programs for a
+# target, from the source release of the installed LLVM, and install them into
+# the resource directory of the compilers, where the drivers look for them:
+#
+#   lib/clang/<major>/lib/<triple>/libflang_rt.runtime.a   Fortran runtime
+#   lib/clang/<major>/lib/<triple>/libclang_rt.builtins.a  compiler-rt builtins
+#
+# Both are static archives of position-independent code. flang-rt has no shared
+# library and no REAL(16) math, which would need libquadmath. The flang driver
+# links the builtins after libgcc on aarch64, so a Fortran program links only
+# when the builtins of the target exist.
+#
+# The compilers are clang, clang++, and flang of LLVM_DIR (default /opt/llvm)
+# with --target=<triple>, which load the configuration <triple>.cfg from the
+# bin directory of LLVM_DIR (sysroot, GCC installation, linker).
+#
+# Examples:
+#   $0 /tmp/llvm-project-22.1.8.src.tar.xz aarch64-unknown-linux-gnu
+#
+set -euo pipefail
+trap "exit" INT
+
+LLVM_DIR="${LLVM_DIR:-/opt/llvm}"
+
+# The parts of the LLVM source tree that the runtimes build reads.
+SOURCE_PARTS=(cmake runtimes llvm/cmake llvm/utils/llvm-lit third-party compiler-rt flang flang-rt)
+
+function extract_source() {
+  local tarball="${1}"
+  local src_dir="${2}"
+  local top
+  top="$(basename "${tarball}")"
+  top="${top%.tar.xz}"
+  local parts=()
+  local part
+  for part in "${SOURCE_PARTS[@]}"; do
+    parts+=("${top}/${part}")
+  done
+  mkdir -p "${src_dir}"
+  tar -xJf "${tarball}" -C "${src_dir}" --strip-components=1 "${parts[@]}"
+}
+
+function configure() {
+  local src_dir="${1}"
+  local build_dir="${2}"
+  local triple="${3}"
+  local bin="${LLVM_DIR}/bin"
+  local resource_dir
+  resource_dir="$("${bin}/clang" -print-resource-dir)"
+  cmake -S "${src_dir}/runtimes" -B "${build_dir}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="${LLVM_DIR}" \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR="${triple%%-*}" \
+    -DCMAKE_C_COMPILER="${bin}/clang" \
+    -DCMAKE_C_COMPILER_TARGET="${triple}" \
+    -DCMAKE_CXX_COMPILER="${bin}/clang++" \
+    -DCMAKE_CXX_COMPILER_TARGET="${triple}" \
+    -DCMAKE_ASM_COMPILER_TARGET="${triple}" \
+    -DCMAKE_Fortran_COMPILER="${bin}/flang" \
+    -DCMAKE_Fortran_COMPILER_TARGET="${triple}" \
+    -DCMAKE_Fortran_COMPILER_WORKS=ON \
+    -DCMAKE_AR="${bin}/llvm-ar" \
+    -DCMAKE_NM="${bin}/llvm-nm" \
+    -DCMAKE_RANLIB="${bin}/llvm-ranlib" \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DLLVM_DEFAULT_TARGET_TRIPLE="${triple}" \
+    -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
+    -DLLVM_ENABLE_RUNTIMES="compiler-rt;flang-rt" \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_DOCS=OFF \
+    -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
+    -DCOMPILER_RT_BUILD_BUILTINS=ON \
+    -DCOMPILER_RT_BUILD_CRT=OFF \
+    -DCOMPILER_RT_BUILD_CTX_PROFILE=OFF \
+    -DCOMPILER_RT_BUILD_GWP_ASAN=OFF \
+    -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
+    -DCOMPILER_RT_BUILD_MEMPROF=OFF \
+    -DCOMPILER_RT_BUILD_ORC=OFF \
+    -DCOMPILER_RT_BUILD_PROFILE=OFF \
+    -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
+    -DCOMPILER_RT_BUILD_XRAY=OFF \
+    -DCOMPILER_RT_INCLUDE_TESTS=OFF \
+    -DCOMPILER_RT_INSTALL_PATH="${resource_dir}" \
+    -DFLANG_RT_ENABLE_SHARED=OFF \
+    -DFLANG_RT_ENABLE_STATIC=ON \
+    -DFLANG_RT_INCLUDE_TESTS=OFF \
+    -DFLANG_RT_INSTALL_RESOURCE_PATH="${resource_dir}" \
+    -DFLANG_RUNTIME_F128_MATH_LIB=""
+}
+
+main() {
+  show_help() {
+    sed -n '2,${/^#/!q; s/^# \?//p}' "${BASH_SOURCE[0]}" | sed "s|\$0|${0##*/}|g"
+  }
+
+  [[ "${1:-}" =~ ^(-h|--help)$ ]] && {
+    show_help
+    exit 0
+  }
+  (($# == 2)) || {
+    show_help >&2
+    exit 1
+  }
+
+  local tarball="${1}"
+  local triple="${2}"
+  local work_dir
+  work_dir="$(mktemp -d)"
+  # shellcheck disable=SC2064 # expand work_dir now, the variable is local
+  trap "rm -rf '${work_dir}'" EXIT
+
+  extract_source "${tarball}" "${work_dir}/src"
+  configure "${work_dir}/src" "${work_dir}/build" "${triple}"
+  cmake --build "${work_dir}/build" --parallel "$(nproc)"
+  cmake --install "${work_dir}/build"
+  install -D -m 0644 "${work_dir}/src/flang-rt/LICENSE.TXT" "${LLVM_DIR}/share/doc/flang-rt/LICENSE.TXT"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

@@ -1,4 +1,31 @@
 #!/usr/bin/env bash
+#
+# Usage: $0
+#
+# Build static OpenBLAS archives for CROSS_TARGET with the compilers of its
+# build image, check them, and package them into .out/<build time>/. ./build
+# runs this script in the image of the target, and hands
+# wasm32-unknown-emscripten over to scripts/main-wasm. VARIANTS selects the
+# variants (default: all four):
+#
+#   plain             single-threaded
+#   threads           multi-threaded, up to 64 threads
+#   relapack          single-threaded, with the recursive LAPACK routines of
+#                     ReLAPACK in place of the LAPACK ones
+#   threads-relapack  multi-threaded, with ReLAPACK
+#
+# The image provides the compilers and tools: CC (clang), FC (flang), HOSTCC
+# (the compiler of the build machine, for the build tools of OpenBLAS), AR, NM,
+# RANLIB, READELF, and TARGET_RUNNER, the command that runs a program of the
+# target on the build machine (empty when it runs directly). Each archive holds
+# libopenblas.a and the Fortran runtime libflang_rt.runtime.a of the flang that
+# compiled LAPACK, so a program that links both needs no other runtime than the
+# C library of the target.
+#
+# Examples:
+#   CROSS_TARGET=x86_64-unknown-linux-gnu ./build
+#   CROSS_TARGET=aarch64-unknown-linux-musl ./build 'VARIANTS="plain threads" ./scripts/main'
+#
 set -euo pipefail
 trap "exit" INT
 
@@ -6,69 +33,102 @@ trap "exit" INT
 
 # shellcheck source=./lib.sh
 source "${BASH_SOURCE%/*}/lib.sh"
+# shellcheck source=./checks.sh
+source "${BASH_SOURCE%/*}/checks.sh"
 
-# WebAssembly has its own source, variants, and checks.
+# WebAssembly has its own variants and checks.
 if [[ "${CROSS_TARGET}" == "wasm32-unknown-emscripten" ]]; then
   exec "${BASH_SOURCE%/*}/main-wasm"
 fi
 
-export VERSION="0.3.34"
-export SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/releases/download/v${VERSION}/OpenBLAS-${VERSION}.tar.gz"
-export SOURCE_SHA256="cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed"
-# OpenBLAS 0.3.34 enlarges the GEMM blocks on AMD Zen 4 and Zen 5 servers in
-# every core table of a DYNAMIC_ARCH build, which overflows the stack of the
-# Haswell and Zen dgemm kernels (OpenMathLib/OpenBLAS#6013). The patches are the
-# upstream fixes a59a5c76 and a78196c5, which limit the change to the AVX-512
-# core tables, and 0302a537, which declares the gotoblas_corename that a78196c5
-# calls.
-PATCH_DIR="$(abspath "patches/native")"
-export PATCH_DIR
+NAME="openblas"
+BUILD_DIR="$(abspath ".build")"
+OUT_DIR="$(abspath ".out")"
+INSTALL_ROOT="/opt/${NAME}"
+build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 
-export CFLAGS="-w ${CFLAGS:-}"
-export CXXFLAGS="-w ${CXXFLAGS:-}"
-export FFLAGS="-w ${FFLAGS:-}"
-export LDFLAGS="-s ${LDFLAGS:-}"
-
-#export CFLAGS="-static-libgcc -static-libstdc++ ${CFLAGS:-}"
-#export CXXFLAGS="-static-libgcc -static-libstdc++ ${CXXFLAGS:-}"
-#export FFLAGS="-static-libgcc -static-libgfortran ${FFLAGS:-}"
-#export LDFLAGS="-static-libgcc -static-libstdc++ ${LDFLAGS:-}"
-
-#export CFLAGS="-static --static ${CFLAGS:-}"
-#export CXXFLAGS="-static --static ${CXXFLAGS:-}"
-#export FFLAGS="-static --static ${FFLAGS:-}"
-#export LDFLAGS="-static --static ${LDFLAGS:-}"
-
-export CFLAGS="-fPIC ${CFLAGS:-}"
-export CXXFLAGS="-fPIC ${CXXFLAGS:-}"
-export FFLAGS="-fPIC ${FFLAGS:-}"
+export CFLAGS="-w -fPIC ${CFLAGS:-}"
+export FFLAGS="-w -fPIC ${FFLAGS:-}"
 export LDFLAGS="-fPIC ${LDFLAGS:-}"
-
-#export CFLAGS="-pie -fPIE ${CFLAGS:-}"
-#export CXXFLAGS="-pie -fPIE ${CXXFLAGS:-}"
-#export LDFLAGS="-pie -fPIE ${LDFLAGS:-}"
-
-#export CC="${CC:-gcc}"
-#export CXX="${CXX:-g++}"
-export AR="${AR:-gcc-ar}"
-export NM="${NM:-gcc-nm}"
-export RANLIB="${RANLIB:-gcc-ranlib}"
 
 export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
 export CCACHE_MAXSIZE="50G"
-export CC="ccache ${CC:-gcc}"
-export CXX="ccache ${CXX:-g++}"
-export FC="${FC:-gfortran}"
 
-export NAME="openblas"
-export BUILD_DIR=".build"
-export OUT_DIR=".out"
-export INSTALL_DIR="/opt/${NAME}"
+# The cores of the arm64 DYNAMIC_CORE list of OpenBLAS on Linux
+# (Makefile.system).
+ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX ARMV9SME THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
 
-#export JOBS="${JOBS:=$(($(nproc --all) + 2))}"
+VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
 
-export build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
+# Print the make variables of a variant.
+function variant_make_vars() {
+  local variant="${1}"
+  local threads="1"
+  local use_thread="0"
+  if [[ "${variant}" == threads* ]]; then
+    threads="64"
+    use_thread="1"
+  fi
+  # NUM_THREADS sets MAX_CPU_NUMBER, which sizes the work buffer table of
+  # OpenBLAS. Unset, the build takes the core count of the build machine.
+  printf '%s\n' "USE_THREAD=${use_thread}" "NUM_THREADS=${threads}" "USE_LOCKING=1"
+  if [[ "${variant}" == *relapack ]]; then
+    printf '%s\n' "BUILD_RELAPACK=1" "RELAPACK_REPLACE=1"
+  fi
+}
+
+# Print the archive name suffix of a variant: plain has none.
+function variant_flavor() {
+  local variant="${1}"
+  if [[ "${variant}" == "plain" ]]; then
+    return
+  fi
+  printf -- '-%s\n' "${variant}"
+}
+
+# Adapt the unpacked source to the targets.
+function prepare_source() {
+  local src_dir="${1}"
+
+  # shellcheck disable=SC2016 # the patterns match make variables literally
+  sed -i -e 's|$(CC) -v |$(CC) |g' \
+    -e 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' \
+    "${src_dir}/relapack/Makefile"
+
+  # dynamic_arm64.c detects SME with getauxval(AT_HWCAP2), but the headers of
+  # glibc older than 2.18 do not define AT_HWCAP2, so the aarch64 glibc 2.17
+  # build fails to compile it. Define it as the file already does for the HWCAP
+  # bits; 26 is the value of the Linux auxiliary vector ABI, and getauxval
+  # returns 0 for it on a kernel that does not provide it.
+  local dynamic_arm64="${src_dir}/driver/others/dynamic_arm64.c"
+  if ! grep -q '^#define AT_HWCAP2 ' "${dynamic_arm64}"; then
+    sed -i '/^#define HWCAP2_SME 1<<23$/{n;a\
+#ifndef AT_HWCAP2\
+#define AT_HWCAP2 26\
+#endif
+}' "${dynamic_arm64}"
+  fi
+  if ! grep -q '^#define AT_HWCAP2 26$' "${dynamic_arm64}"; then
+    printf 'ERROR: %s does not define AT_HWCAP2; update the edit for this OpenBLAS version.\n' "${dynamic_arm64}" >&2
+    return 1
+  fi
+
+  # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
+  # .subsections_via_symbols directive, which lets the linker split a section
+  # into one piece per symbol. The kernels name their branch targets with .L
+  # labels, which are ordinary symbols in Mach-O (only L labels are local), so
+  # the linker splits each function at its branch targets. Dead stripping
+  # (rustc passes -dead_strip) and deduplication then drop the pieces that are
+  # reached only by falling through, and the truncated kernel runs into
+  # unrelated code. Without the directive, each kernel object stays whole.
+  # https://github.com/OpenMathLib/OpenBLAS/issues/6089
+  sed -i 's|^#define EPILOGUE\t\.subsections_via_symbols$|#define EPILOGUE|' "${src_dir}/common_x86_64.h"
+  if grep -q 'subsections_via_symbols' "${src_dir}/common_x86_64.h"; then
+    printf 'ERROR: %s still sets .subsections_via_symbols; update the edit for this OpenBLAS version.\n' "${src_dir}/common_x86_64.h" >&2
+    return 1
+  fi
+}
 
 # Print the archive members that set MH_SUBSECTIONS_VIA_SYMBOLS and define .L
 # symbols in their code.
@@ -85,16 +145,12 @@ function macho_split_members() {
   comm -12 <(printf '%s\n' "${split}") <(printf '%s\n' "${labeled}")
 }
 
-# The cores of the arm64 DYNAMIC_CORE list of OpenBLAS 0.3.34 on Linux
-# (Makefile.system) with NO_SME.
-ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
-
 # Fail when the archive lacks the dispatch table gotoblas_<core> of a core.
 function check_kernel_cores() {
   local lib="${1}"
   shift
   local symbols
-  symbols="$("${NM:-nm}" --defined-only "${lib}" | awk '{print $NF}' | sed 's/^_//' | sort -u)" || return
+  symbols="$(archive_symbols "${lib}" --defined-only)" || return
   local core
   local missing=()
   for core in "$@"; do
@@ -108,218 +164,228 @@ function check_kernel_cores() {
   fi
 }
 
-# Variants to build, named as in the archive names. All four by default; select
-# some with, for example: ./build 'VARIANTS="plain threads" ./scripts/main'
-VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
-for variant in ${VARIANTS}; do
-  case "${variant}" in
-  plain | threads | relapack | threads-relapack) ;;
-  *)
-    printf 'ERROR: unknown variant "%s" in VARIANTS; known: plain threads relapack threads-relapack\n' "${variant}" >&2
-    exit 1
+# Name the Fortran runtime next to libopenblas.a in the pkg-config and CMake
+# files of OpenBLAS, which name libopenblas.a alone. flang-rt locks its units
+# with pthread mutexes, which glibc 2.17 keeps in libpthread.
+function link_fortran_runtime() {
+  local install_dir="${1}"
+  local pc="${install_dir}/lib/pkgconfig/openblas.pc"
+  local cmake="${install_dir}/lib/cmake/openblas/OpenBLASConfig.cmake"
+  sed -i -e 's|^\(Libs: .*\)$|\1 -lflang_rt.runtime|' -e 's|^\(Libs.private: .*\)$|\1 -lpthread|' "${pc}"
+  if ! grep -q '^Libs: .* -lflang_rt.runtime$' "${pc}" || ! grep -q '^SET(OpenBLAS_LIBRARIES ' "${cmake}"; then
+    printf 'ERROR: %s or %s has an unknown layout; update link_fortran_runtime for this OpenBLAS version.\n' "${pc}" "${cmake}" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2016 # a CMake variable, expanded by CMake
+  printf '%s\n' 'list(APPEND OpenBLAS_LIBRARIES ${_OpenBLAS_ROOT_DIR}/lib/libflang_rt.runtime.a)' >>"${cmake}"
+}
+
+# Run the checks of OpenBLAS on an installed archive.
+function check_archive() {
+  local install_dir="${1}"
+  local work_dir="${2}"
+  shift 2
+  local cores=("$@")
+  local lib="${install_dir}/lib/libopenblas.a"
+
+  # Reject legacy .ctors/.dtors constructors. GNU ld folds them into
+  # .init_array, but lld (by design) does not, so a constructor such as
+  # OpenBLAS's DYNAMIC_ARCH gotoblas_init silently never runs and the first
+  # BLAS call dereferences a null dispatch table.
+  if [[ ! "${CROSS_TARGET}" =~ (apple|darwin) ]] && "${READELF}" -SW "${lib}" | grep -qE '\.(ctors|dtors)'; then
+    printf 'ERROR: %s contains legacy .ctors/.dtors sections; constructors will not run under lld.\n' "${lib}" >&2
+    return 1
+  fi
+
+  # Reject Mach-O objects that the linker would split at their .L labels (see
+  # prepare_source).
+  if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+    local split_members
+    if ! split_members="$(macho_split_members "${lib}")"; then
+      printf 'ERROR: cannot read the objects of %s\n' "${lib}" >&2
+      return 1
+    fi
+    if [[ -n "${split_members}" ]]; then
+      printf 'ERROR: %s has objects with MH_SUBSECTIONS_VIA_SYMBOLS and .L symbols; the linker splits their functions:\n%s\n' "${lib}" "${split_members}" >&2
+      return 1
+    fi
+  fi
+
+  # Reject an archive without the kernels of a requested core. OpenBLAS can
+  # leave out a core without an error when its compiler checks fail (NO_SVE,
+  # NO_SME, NO_AVX512), and the dispatch then uses an older core.
+  if ((${#cores[@]} > 0)); then
+    check_kernel_cores "${lib}" "${cores[@]}" || return
+  fi
+
+  check_fortran_runtime "${lib}" "${install_dir}/lib/libflang_rt.runtime.a" || return
+  check_consumer "${install_dir}" "${work_dir}" ${cores[@]+"${cores[@]}"} || return
+}
+
+function build_variant() {
+  local variant="${1}"
+  local flang_rt="${2}"
+  local flavor
+  flavor="$(variant_flavor "${variant}")"
+  local build_dir="${BUILD_DIR}/${CROSS_TARGET}${flavor}"
+  local src_dir="${build_dir}/${NAME}-${OPENBLAS_VERSION}"
+  local install_dir="${INSTALL_ROOT}/${CROSS_TARGET}${flavor}"
+  local outdir="${OUT_DIR}/${build_time}"
+  local build_log="${build_dir}/${build_time}-build.log"
+  mkdir -p "${build_dir}" "${outdir}"
+  rm -rf "${install_dir}"
+
+  fetch_source "${OPENBLAS_SOURCE_URL}" "${OPENBLAS_SOURCE_SHA256}" "${build_dir}/${OPENBLAS_COMMIT}.tar.gz" "${src_dir}"
+  prepare_source "${src_dir}"
+
+  # For explanation of build variables, see
+  # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
+  local make_vars=(
+    "CC=ccache ${CC}"
+    "FC=${FC}"
+    "HOSTCC=${HOSTCC}"
+    "AR=${AR}"
+    "RANLIB=${RANLIB}"
+    BINARY=64
+    CROSS=1
+    DYNAMIC_ARCH=1
+    FIXED_LIBNAME=1
+    NO_LAPACK=0
+    NO_LAPACKE=0
+    NOFORTRAN=0
+    NO_AFFINITY=1
+    NO_WARMUP=1
+    BUILD_SHARED=0
+    BUILD_STATIC=1
+    NO_SHARED=1
+    NO_STATIC=0
+    USE_OPENMP=0
+    NUM_PARALLEL=1
+  )
+  local line
+  while IFS= read -r line; do
+    make_vars+=("${line}")
+  done < <(variant_make_vars "${variant}")
+
+  local cores=()
+  case "${CROSS_TARGET}" in
+  aarch64-apple* | aarch64-darwin*)
+    make_vars+=(TARGET=VORTEX)
+    ;;
+  aarch64*)
+    # DYNAMIC_ARCH builds every arm64 kernel of OpenBLAS, including the SVE
+    # and SME ones. ARMV8 is the runtime baseline for any other CPU.
+    make_vars+=(TARGET=ARMV8)
+    read -ra cores <<<"${ARM64_LINUX_CORES}"
+    ;;
+  x86_64*)
+    local dynamic_list
+    dynamic_list="$("${BASH_SOURCE%/*}/get_x86_archs" <"${src_dir}/TargetList.txt")"
+    make_vars+=(TARGET=HASWELL "DYNAMIC_LIST=${dynamic_list}")
+    read -ra cores <<<"PRESCOTT ${dynamic_list}"
     ;;
   esac
-done
+  if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
+    make_vars+=(CONSISTENT_FPCSR=1)
+  fi
+  if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
+    local apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+    export CFLAGS="${apple_common} ${CFLAGS}"
+    export FFLAGS="${apple_common} ${FFLAGS}"
+    export LDFLAGS="${apple_common} ${LDFLAGS}"
+  fi
 
-for relapack in "0" "1"; do
-  for threads in "0" "64"; do
-    variant="plain"
-    if ((threads > 1)); then
-      variant="threads"
-    fi
-    if [ "${relapack}" == "1" ]; then
-      variant="${variant/#plain/}"
-      variant="${variant:+${variant}-}relapack"
-    fi
-    if [[ " ${VARIANTS} " != *" ${variant} "* ]]; then
-      continue
-    fi
+  # The library targets only: the default target also links the test programs,
+  # which the tests below link with the link flags of the target.
+  ${NICE} make -C "${src_dir}" -s libs netlib re_lapack "${make_vars[@]}" 2>&1 | log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
+  ${NICE} make -C "${src_dir}" -s install PREFIX="${install_dir}" "${make_vars[@]}" 2>&1 | log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
 
-    # For explanation of build variables, see
-    # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
-    flavor=""
-    if ((threads > 1)); then
-      export USE_THREAD="1"
-      export NUM_THREADS="${threads:-1}"
-      export USE_LOCKING="1"
-      flavor="${flavor}-threads"
-    else
-      export USE_THREAD="0"
-      export NUM_THREADS="1"
-      export USE_LOCKING="1"
-    fi
+  install -m 0644 "${flang_rt}" "${install_dir}/lib/libflang_rt.runtime.a"
+  install -D -m 0644 "${LLVM_DIR:?}/share/doc/flang-rt/LICENSE.TXT" "${install_dir}/share/doc/flang-rt/LICENSE.TXT"
+  link_fortran_runtime "${install_dir}"
 
-    if [ "${relapack}" == "1" ]; then
-      export BUILD_RELAPACK=1
-      export RELAPACK_REPLACE=1
-      flavor="${flavor}-relapack"
-    fi
+  check_archive "${install_dir}" "${build_dir}/check" ${cores[@]+"${cores[@]}"}
 
-    build_dir="$(abspath ${BUILD_DIR})/${CROSS_TARGET}${flavor}"
-    install_dir="$(abspath "${INSTALL_DIR}")/${CROSS_TARGET}${flavor}"
-    outdir="$(abspath "${OUT_DIR}")/${build_time}"
-    mkdir -p "${build_dir}" "${install_dir}" "${outdir}"
+  check_test_runner
+  ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
+    log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
 
-    pushd "$build_dir" >/dev/null
-    {
-      src_dir="${NAME}-${VERSION}"
+  local archive="${outdir}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
+  package "${install_dir}" "${archive}"
+  write_metadata "${archive}" "$(variant_metadata "${variant}" "${install_dir}")"
+  printf 'Built %s\n' "${archive##*/}"
+}
 
-      fetch_source "${SOURCE_URL}" "${SOURCE_SHA256}" "${build_dir}/OpenBLAS-${VERSION}.tar.gz" "${src_dir}"
+# Print the metadata fields of an archive as a JSON object.
+function variant_metadata() {
+  local variant="${1}"
+  local install_dir="${2}"
+  local contents
+  contents="$(find "${install_dir}" -type f -printf '%P\n' | LC_ALL=C sort | jq -R . | jq -s .)"
+  jq -n \
+    --arg variant "${variant}" \
+    --arg openblas "${OPENBLAS_VERSION}" \
+    --arg openblas_commit "${OPENBLAS_COMMIT}" \
+    --arg source "${OPENBLAS_SOURCE_URL}" \
+    --arg source_sha256 "${OPENBLAS_SOURCE_SHA256}" \
+    --arg compiler "$(${CC} --version | head -1)" \
+    --arg fortran_compiler "$(${FC} --version | head -1)" \
+    --arg llvm "${LLVM_RELEASE:?}" \
+    --arg llvm_source "${LLVM_SOURCE:?}" \
+    --arg llvm_source_sha256 "${LLVM_SOURCE_SHA256:?}" \
+    --arg gcc "${GCC_RELEASE:?}" \
+    --arg flang_rt_sha256 "$(sha256sum "${install_dir}/lib/libflang_rt.runtime.a" | cut -d' ' -f1)" \
+    --argjson contents "${contents}" \
+    '{
+      kind: "native",
+      variant: $variant,
+      openblas: $openblas,
+      openblas_commit: $openblas_commit,
+      source: $source,
+      source_sha256: $source_sha256,
+      compiler: $compiler,
+      fortran_compiler: $fortran_compiler,
+      llvm: $llvm,
+      gcc: $gcc,
+      flang_rt: {
+        file: "lib/libflang_rt.runtime.a",
+        sha256: $flang_rt_sha256,
+        source: $llvm_source,
+        source_sha256: $llvm_source_sha256,
+        build_script: "docker/files/build-llvm-runtimes"
+      },
+      contents: $contents
+    }'
+}
 
-      # Fixes from OpenBLAS develop that the release lacks, as git format-patch
-      # files named after their upstream commits.
-      for patch_file in "${PATCH_DIR}"/*.patch; do
-        [[ -f "${patch_file}" ]] || continue # no patches
-        printf 'Applying %s\n' "${patch_file##*/}"
-        patch -d "${src_dir}" -p1 --forward --fuzz=0 <"${patch_file}"
-      done
-
-      sed -i 's|$(CC) -v |$(CC) |g' "${src_dir}/relapack/Makefile"
-      sed -i 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' "${src_dir}/relapack/Makefile"
-
-      # dynamic_arm64.c detects SME with getauxval(AT_HWCAP2), but the headers of
-      # glibc older than 2.18 do not define AT_HWCAP2, so the aarch64 glibc 2.17
-      # build fails to compile it. Define it as the file already does for the
-      # HWCAP bits; 26 is the value of the Linux auxiliary vector ABI, and
-      # getauxval returns 0 for it on a kernel that does not provide it.
-      if ! grep -q '^#define AT_HWCAP2 ' "${src_dir}/driver/others/dynamic_arm64.c"; then
-        sed -i '/^#define HWCAP2_SME 1<<23$/{n;a\
-#ifndef AT_HWCAP2\
-#define AT_HWCAP2 26\
-#endif
-}' "${src_dir}/driver/others/dynamic_arm64.c"
-      fi
-      if ! grep -q '^#define AT_HWCAP2 26$' "${src_dir}/driver/others/dynamic_arm64.c"; then
-        printf 'ERROR: %s does not define AT_HWCAP2; update the patch for this OpenBLAS version.\n' "${src_dir}/driver/others/dynamic_arm64.c" >&2
-        exit 1
-      fi
-
-      # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
-      # .subsections_via_symbols directive, which lets the linker split a section
-      # into one piece per symbol. The kernels name their branch targets with .L
-      # labels, which are ordinary symbols in Mach-O (only L labels are local), so
-      # the linker splits each function at its branch targets. Dead stripping
-      # (rustc passes -dead_strip) and deduplication then drop the pieces that
-      # are reached only by falling through, and the truncated kernel runs into
-      # unrelated code. Without the directive, each kernel object stays whole.
-      # https://github.com/OpenMathLib/OpenBLAS/issues/6089
-      sed -i 's|^#define EPILOGUE\t\.subsections_via_symbols$|#define EPILOGUE|' "${src_dir}/common_x86_64.h"
-      if grep -q 'subsections_via_symbols' "${src_dir}/common_x86_64.h"; then
-        printf 'ERROR: %s still sets .subsections_via_symbols; update the patch for this OpenBLAS version.\n' "${src_dir}/common_x86_64.h" >&2
-        exit 1
-      fi
-
-      pushd "${src_dir}" >/dev/null
-      {
-        # For explanation of build variables, see
-        # https://github.com/OpenMathLib/OpenBLAS/wiki/WIP---Build-system-overview-(community-made)
-        export BINARY="64"
-
-        export NO_LAPACKE="0"
-        export NO_LAPACK="0"
-        export NOFORTRAN="0"
-        export NO_AFFINITY="1"
-        export NO_WARMUP="1"
-
-        export CROSS="1"
-        export DYNAMIC_ARCH="1"
-        export FIXED_LIBNAME="1"
-
-        export BUILD_SHARED="0"
-        export BUILD_STATIC="1"
-        export NO_SHARED="1"
-        export NO_STATIC="0"
-
-        export USE_OPENMP="0"
-        export NUM_PARALLEL="1"
-
-        # The ARMV9SME core has single-precision kernels (SGEMM, SSYMM, SSYRK,
-        # SSYR2K, STRMM) whose code compiles only with clang; built with GCC
-        # they return without computing (OpenMathLib/OpenBLAS#6099). NO_SME
-        # leaves the core out, and SME CPUs use the SVE or Neoverse N1 kernels.
-        if [[ "${CROSS_TARGET}" == aarch64* ]]; then
-          export NO_SME="1"
-        fi
-
-        case "${CROSS_TARGET}" in
-        aarch64-apple* | aarch64-darwin*)
-          export TARGET="VORTEX"
-          ;;
-        aarch64*)
-          # DYNAMIC_ARCH builds every arm64 kernel of OpenBLAS, including the
-          # SVE and SME ones, which need the binutils 2.43 of the cross
-          # toolchain. ARMV8 is the runtime baseline for any other CPU.
-          export TARGET="ARMV8"
-          kernel_cores="${ARM64_LINUX_CORES}"
-          ;;
-        x86_64*)
-          export TARGET="HASWELL"
-          DYNAMIC_LIST="$(../../../scripts/get_x86_archs <"$build_dir/${src_dir}/TargetList.txt")"
-          export DYNAMIC_LIST
-          kernel_cores="PRESCOTT ${DYNAMIC_LIST}"
-          ;;
-        esac
-
-        if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
-          export CONSISTENT_FPCSR="1"
-        elif [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
-          apple_common="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-          export CFLAGS="${apple_common} ${CFLAGS:-}"
-          export CXXFLAGS="${apple_common} ${CXXFLAGS:-}"
-          export FFLAGS="${apple_common} ${FFLAGS:-}"
-          export LDFLAGS="${apple_common} ${LDFLAGS:-}"
-        fi
-
-        export FFLAGS="${FFLAGS} -frecursive"
-
-        ${NICE} make -s 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
-
-        ${NICE} make -s install PREFIX="${install_dir}" 2>&1 | log "${build_time}-build.log" | ../../../scripts/no_noise
-
-        # Reject legacy .ctors/.dtors constructors. GNU ld folds them into
-        # .init_array, but lld (by design) does not, so a constructor such as
-        # OpenBLAS's DYNAMIC_ARCH gotoblas_init silently never runs and the first
-        # BLAS call dereferences a null dispatch table. GCC >= 12 emits .init_array
-        # by default; older GCC without --enable-initfini-array emits .ctors.
-        if "${READELF:-readelf}" -SW "${install_dir}/lib/libopenblas.a" | grep -qE '\.(ctors|dtors)'; then
-          printf 'ERROR: %s contains legacy .ctors/.dtors sections; constructors will not run under lld. Build with GCC >= 12 or configure GCC with --enable-initfini-array.\n' "${install_dir}/lib/libopenblas.a" >&2
-          exit 1
-        fi
-
-        # Reject Mach-O objects that the linker would split at their .L labels
-        # (see the common_x86_64.h patch above).
-        if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
-          if ! split_members="$(macho_split_members "${install_dir}/lib/libopenblas.a")"; then
-            printf 'ERROR: cannot read the objects of %s\n' "${install_dir}/lib/libopenblas.a" >&2
-            exit 1
-          fi
-          if [ -n "${split_members}" ]; then
-            printf 'ERROR: %s has objects with MH_SUBSECTIONS_VIA_SYMBOLS and .L symbols; the linker splits their functions:\n%s\n' "${install_dir}/lib/libopenblas.a" "${split_members}" >&2
-            exit 1
-          fi
-        fi
-
-        # Reject an archive without the kernels of a requested core. OpenBLAS
-        # can leave out a core without an error when its compiler checks fail
-        # (NO_SVE, NO_SME, NO_AVX512), and the dispatch then uses an older core.
-        if [[ ! "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
-          read -ra cores <<<"${kernel_cores}"
-          check_kernel_cores "${install_dir}/lib/libopenblas.a" "${cores[@]}"
-        fi
-
-        archive="${outdir}/${NAME}-static${flavor}-${VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
-        package "${install_dir}" "${archive}"
-        write_metadata "${archive}" \
-          kind native \
-          variant "${variant}" \
-          openblas "${VERSION}" \
-          source "${SOURCE_URL}" \
-          source_sha256 "${SOURCE_SHA256}" \
-          patches "$(cd "${PATCH_DIR}" && ls -- *.patch 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" \
-          compiler "$(${CC#ccache } --version | head -1)"
-      }
-      popd >/dev/null
-    }
-    popd >/dev/null
+main() {
+  local variant
+  for variant in ${VARIANTS}; do
+    case "${variant}" in
+    plain | threads | relapack | threads-relapack) ;;
+    *)
+      printf 'ERROR: unknown variant "%s" in VARIANTS; known: plain threads relapack threads-relapack\n' "${variant}" >&2
+      exit 1
+      ;;
+    esac
   done
-done
+  : "${CC:?CC names the C compiler of the target}"
+  : "${FC:?FC names the Fortran compiler of the target}"
+  : "${HOSTCC:?HOSTCC names the C compiler of the build machine}"
+  : "${AR:?}" "${NM:?}" "${RANLIB:?}" "${READELF:?}"
+
+  local flang_rt
+  flang_rt="$(${CC} -print-file-name=libflang_rt.runtime.a)"
+  if [[ ! -f "${flang_rt}" ]]; then
+    printf 'ERROR: %s finds no libflang_rt.runtime.a for %s\n' "${CC}" "${CROSS_TARGET}" >&2
+    exit 1
+  fi
+
+  for variant in ${VARIANTS}; do
+    build_variant "${variant}" "${flang_rt}"
+  done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

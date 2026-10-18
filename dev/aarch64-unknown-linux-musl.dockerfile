@@ -26,6 +26,7 @@ RUN set -euxo pipefail >/dev/null \
   sudo \
   tar \
   xz \
+  zstd \
 >/dev/null \
 && yum clean all >/dev/null \
 && rm -rf /var/cache/yum
@@ -49,37 +50,78 @@ RUN set -euxo pipefail >/dev/null \
 && ls /usr/bin/gcc-ar \
 && gcc-ar --version
 
+# clang, flang, lld, and the LLVM binary tools. The runtimes of the target are
+# built below from the LLVM source of this release.
+ENV LLVM_RELEASE="llvm-22.1.8-2026-10-18_10-26-24"
+ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"
+ENV LLVM_SOURCE_SHA256="922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888"
+ENV LLVM_DIR="/opt/llvm"
+RUN set -euxo pipefail >/dev/null \
+&& mkdir -p "${LLVM_DIR}" \
+&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "c80ac102a9b833ccc3de6e838fba592f76334bda8b57b6629f853d8d2a84bae8" /tmp/download \
+&& zstd -dc /tmp/download | tar -C "${LLVM_DIR}" -x \
+&& rm /tmp/download \
+&& "${LLVM_DIR}/bin/clang" --version \
+&& "${LLVM_DIR}/bin/flang" --version
+
+# qemu-aarch64 runs the aarch64 check programs. The Debian build is a static
+# executable.
+RUN set -euxo pipefail >/dev/null \
+&& fetch "https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/q/qemu/qemu-user_10.0.13%2Bds-0%2Bdeb13u1_amd64.deb" "ca6ede739327a20ae5a3498230c8a3a9a072c586e131bc6bcc1201eb1725e336" /tmp/qemu-user.deb \
+&& mkdir /tmp/qemu-user \
+&& "${LLVM_DIR}/bin/llvm-ar" x --output=/tmp/qemu-user /tmp/qemu-user.deb data.tar.xz \
+&& tar -C /tmp/qemu-user -xJf /tmp/qemu-user/data.tar.xz ./usr/bin/qemu-aarch64 \
+&& install -m 0755 /tmp/qemu-user/usr/bin/qemu-aarch64 /usr/local/bin/qemu-aarch64 \
+&& rm -rf /tmp/qemu-user /tmp/qemu-user.deb \
+&& qemu-aarch64 --version
+
 ENV TRIPLET="aarch64-unknown-linux-musl"
+ENV GCC_VERSION="14.4.0"
+ENV GCC_RELEASE="gcc-${GCC_VERSION}-2026-10-18_01-15-48"
 ENV GCC_DIR="/opt/gcc"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \
-&& fetch "https://github.com/binarylandia/build_crosstool-ng/releases/download/gcc-14.4.0-2026-10-18_01-15-48/gcc-14.4.0-${TRIPLET}-2026-10-18_01-15-48.tar.xz" "a58ac13a747aeef152359c2951938f8b43ba9e7e7357a14c4fd26ff72c969c12" /tmp/download \
+&& fetch "https://github.com/binarylandia/build_crosstool-ng/releases/download/${GCC_RELEASE}/gcc-${GCC_VERSION}-${TRIPLET}-2026-10-18_01-15-48.tar.xz" "a58ac13a747aeef152359c2951938f8b43ba9e7e7357a14c4fd26ff72c969c12" /tmp/download \
 && tar -C "${GCC_DIR}" -xJf /tmp/download \
 && rm /tmp/download \
-&& ls ${GCC_DIR}/bin/${TRIPLET}-gcc \
-&& ${GCC_DIR}/bin/${TRIPLET}-gcc -v \
-&& ls ${GCC_DIR}/bin/${TRIPLET}-gcc-ar \
-&& ${GCC_DIR}/bin/${TRIPLET}-gcc-ar --version
+&& ${GCC_DIR}/bin/${TRIPLET}-gcc -v
 
-ENV HOSTCC="/usr/bin/gcc"
-ENV CC="${GCC_DIR}/bin/${TRIPLET}-cc"
-ENV CXX="${GCC_DIR}/bin/${TRIPLET}-g++"
-ENV FC="${GCC_DIR}/bin/${TRIPLET}-gfortran"
-ENV ADDR2LINE="${GCC_DIR}/bin/${TRIPLET}-addr2line"
-ENV AR="${GCC_DIR}/bin/${TRIPLET}-gcc-ar"
-ENV AS="${GCC_DIR}/bin/${TRIPLET}-as"
-ENV CPP="${GCC_DIR}/bin/${TRIPLET}-cpp"
-ENV ELFEDIT="${GCC_DIR}/bin/${TRIPLET}-elfedit"
-ENV LD="${GCC_DIR}/bin/${TRIPLET}-ld"
-ENV LDD="${GCC_DIR}/bin/${TRIPLET}-ldd"
-ENV NM="${GCC_DIR}/bin/${TRIPLET}-gcc-nm"
-ENV OBJCOPY="${GCC_DIR}/bin/${TRIPLET}-objcopy"
-ENV OBJDUMP="${GCC_DIR}/bin/${TRIPLET}-objdump"
-ENV RANLIB="${GCC_DIR}/bin/${TRIPLET}-gcc-ranlib"
-ENV READELF="${GCC_DIR}/bin/${TRIPLET}-readelf"
-ENV SIZE="${GCC_DIR}/bin/${TRIPLET}-size"
-ENV STRINGS="${GCC_DIR}/bin/${TRIPLET}-strings"
-ENV STRIP="${GCC_DIR}/bin/${TRIPLET}-strip"
+# clang and flang for the target: --target=<triple> loads <triple>.cfg from the
+# bin directory of LLVM, which selects the sysroot and the GCC runtime (crt
+# files, libgcc, libstdc++ headers) of the crosstool-NG toolchain, and lld.
+COPY docker/files/build-llvm-runtimes /usr/local/bin/build-llvm-runtimes
+RUN set -euxo pipefail >/dev/null \
+&& printf -- '%s\n' \
+  "--sysroot=${GCC_DIR}/${TRIPLET}/sysroot" \
+  "--gcc-install-dir=${GCC_DIR}/lib/gcc/${TRIPLET}/${GCC_VERSION}" \
+  "-fuse-ld=lld" \
+  >"${LLVM_DIR}/bin/${TRIPLET}.cfg" \
+&& fetch "${LLVM_SOURCE}" "${LLVM_SOURCE_SHA256}" "/tmp/${LLVM_SOURCE##*/}" \
+&& build-llvm-runtimes "/tmp/${LLVM_SOURCE##*/}" "${TRIPLET}" \
+&& rm "/tmp/${LLVM_SOURCE##*/}" \
+&& ls "${LLVM_DIR}/lib/clang/22/lib/${TRIPLET}/libflang_rt.runtime.a" "${LLVM_DIR}/lib/clang/22/lib/${TRIPLET}/libclang_rt.builtins.a"
+
+ENV HOSTCC="${LLVM_DIR}/bin/clang --no-default-config"
+ENV CC="${LLVM_DIR}/bin/clang --target=${TRIPLET}"
+ENV CXX="${LLVM_DIR}/bin/clang++ --target=${TRIPLET}"
+ENV FC="${LLVM_DIR}/bin/flang --target=${TRIPLET}"
+ENV AR="${LLVM_DIR}/bin/llvm-ar"
+ENV LD="${LLVM_DIR}/bin/ld.lld"
+ENV NM="${LLVM_DIR}/bin/llvm-nm"
+ENV OBJCOPY="${LLVM_DIR}/bin/llvm-objcopy"
+ENV OBJDUMP="${LLVM_DIR}/bin/llvm-objdump"
+ENV RANLIB="${LLVM_DIR}/bin/llvm-ranlib"
+ENV READELF="${LLVM_DIR}/bin/llvm-readelf"
+ENV SIZE="${LLVM_DIR}/bin/llvm-size"
+ENV STRINGS="${LLVM_DIR}/bin/llvm-strings"
+ENV STRIP="${LLVM_DIR}/bin/llvm-strip"
+# qemu-aarch64 runs the programs of the target with the dynamic loader and the
+# libraries of the sysroot, on a CPU with every aarch64 extension that OpenBLAS
+# has kernels for (SVE, SME). Both variables also apply to the binfmt_misc
+# handler of the build machine, which runs the OpenBLAS tests.
+ENV QEMU_LD_PREFIX="${GCC_DIR}/${TRIPLET}/sysroot"
+ENV QEMU_CPU="max"
+ENV TARGET_RUNNER="qemu-aarch64"
 
 
 ARG USER=user
