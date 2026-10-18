@@ -2,12 +2,20 @@
 #
 # Usage: $0 <LLVM source tarball> <target triple>
 #
-# Build the LLVM runtimes that clang and flang need to link programs for a
-# target, from the source release of the installed LLVM, and install them into
-# the resource directory of the compilers, where the drivers look for them:
+# Build the parts of LLVM that clang and flang need to compile and link
+# programs for a target, from the source release of the installed LLVM, and
+# install them where the drivers look for them:
 #
+#   include/flang/*.mod                                    Fortran intrinsic modules
 #   lib/clang/<major>/lib/<triple>/libflang_rt.runtime.a   Fortran runtime
 #   lib/clang/<major>/lib/<triple>/libclang_rt.builtins.a  compiler-rt builtins
+#
+# flang reads the intrinsic modules (iso_c_binding, ieee_arithmetic, and
+# others) only from the include/flang directory next to its executable, and
+# their contents depend on the target: the x86_64 modules of the release declare
+# REAL(KIND=10), which flang rejects for aarch64. The modules are rebuilt for the
+# target in place, so an installation of LLVM compiles Fortran for one target.
+# The CUDA, PowerPC, and OpenMP modules of the release stay as they are.
 #
 # Both are static archives of position-independent code. flang-rt has no shared
 # library and no REAL(16) math, which would need libquadmath. The flang driver
@@ -42,6 +50,41 @@ function extract_source() {
   done
   mkdir -p "${src_dir}"
   tar -xJf "${tarball}" -C "${src_dir}" --strip-components=1 "${parts[@]}"
+}
+
+# The intrinsic modules that the flang build generates with -fsyntax-only, in
+# the order of their dependencies, without the CUDA and PowerPC ones.
+INTRINSIC_MODULES=(
+  __fortran_builtins
+  __fortran_type_info
+  __fortran_ieee_exceptions
+  ieee_exceptions
+  ieee_arithmetic
+  ieee_features
+  iso_c_binding
+  iso_fortran_env_impl
+  iso_fortran_env
+  flang_debug
+)
+
+# Rebuild the intrinsic modules for the target, with REAL(KIND=16) when the long
+# double of the target has a 113-bit mantissa, as the flang build decides.
+function build_intrinsic_modules() {
+  local src_dir="${1}"
+  local triple="${2}"
+  local bin="${LLVM_DIR}/bin"
+  local module_dir="${LLVM_DIR}/include/flang"
+  local mantissa
+  mantissa="$("${bin}/clang" --target="${triple}" -dM -E -x c /dev/null | awk '$2 == "__LDBL_MANT_DIG__" {print $3}')"
+  local defines=()
+  if [[ "${mantissa}" == "113" ]]; then
+    defines+=(-DFLANG_SUPPORT_R16)
+  fi
+  local module
+  for module in "${INTRINSIC_MODULES[@]}"; do
+    "${bin}/flang" --target="${triple}" ${defines[@]+"${defines[@]}"} -cpp -fsyntax-only \
+      -module-dir "${module_dir}" "${src_dir}/flang/module/${module}.f90"
+  done
 }
 
 function configure() {
@@ -115,6 +158,7 @@ main() {
   trap "rm -rf '${work_dir}'" EXIT
 
   extract_source "${tarball}" "${work_dir}/src"
+  build_intrinsic_modules "${work_dir}/src" "${triple}"
   configure "${work_dir}/src" "${work_dir}/build" "${triple}"
   cmake --build "${work_dir}/build" --parallel "$(nproc)"
   cmake --install "${work_dir}/build"
