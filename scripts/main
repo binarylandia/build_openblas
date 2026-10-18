@@ -126,16 +126,23 @@ function prepare_source() {
     -e 's|@echo "Building ReLAPACK library $(LIBNAME)"|@echo -n|g' \
     "${src_dir}/relapack/Makefile"
 
-  # RELAPACK_REPLACE=1 also puts the recursive GEMMT of ReLAPACK, which its LDL
-  # factorizations use, under the BLAS names sgemmt_, dgemmt_, cgemmt_, and
-  # zgemmt_, in place of the GEMMT of OpenBLAS. It fails the GEMMT unit tests
-  # of OpenBLAS: other argument errors, and wrong cgemmt and zgemmt results
-  # when both operands are conjugate-transposed. INCLUDE_XGEMMT 0 keeps it
-  # inside ReLAPACK.
-  local relapack_config="${src_dir}/relapack/relapack_config.h"
-  sed -i 's|^#define INCLUDE_XGEMMT INCLUDE_ALL$|#define INCLUDE_XGEMMT 0|' "${relapack_config}"
-  if ! grep -q '^#define INCLUDE_XGEMMT 0$' "${relapack_config}"; then
-    printf 'ERROR: %s does not set INCLUDE_XGEMMT; update the edit for this OpenBLAS version.\n' "${relapack_config}" >&2
+  # With RELAPACK_REPLACE=1, a ReLAPACK object takes the name of the OpenBLAS
+  # object that it replaces in libopenblas.a (sgetrf.o). Its GEMMT objects
+  # (sgemmt.o, dgemmt.o, cgemmt.o, zgemmt.o) thus replace the GEMMT of OpenBLAS
+  # with the recursive GEMMT that the LDL factorizations of ReLAPACK use, which
+  # fails the GEMMT unit tests of OpenBLAS: other argument errors, and wrong
+  # cgemmt and zgemmt results when both operands are conjugate-transposed. Other
+  # source names and INCLUDE_XGEMMT 0 keep that GEMMT inside ReLAPACK.
+  local relapack_dir="${src_dir}/relapack"
+  local precision
+  for precision in s d c z; do
+    mv "${relapack_dir}/src/${precision}gemmt.c" "${relapack_dir}/src/${precision}gemmt_relapack.c"
+  done
+  sed -i -E 's/(^|[[:space:]])([sdcz])gemmt\.c([[:space:]]|$)/\1\2gemmt_relapack.c\3/g' "${relapack_dir}/Makefile"
+  sed -i 's|^#define INCLUDE_XGEMMT INCLUDE_ALL$|#define INCLUDE_XGEMMT 0|' "${relapack_dir}/relapack_config.h"
+  if grep -qE '(^|[[:space:]])[sdcz]gemmt\.c' "${relapack_dir}/Makefile" ||
+    ! grep -q '^#define INCLUDE_XGEMMT 0$' "${relapack_dir}/relapack_config.h"; then
+    printf 'ERROR: %s builds the GEMMT of ReLAPACK under the OpenBLAS names; update the edit for this OpenBLAS version.\n' "${relapack_dir}" >&2
     return 1
   fi
 
