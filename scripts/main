@@ -55,9 +55,33 @@ export CCACHE_DIR="/cache/ccache"
 export CCACHE_NOCOMPRESS="1"
 export CCACHE_MAXSIZE="50G"
 
-# The cores of the arm64 DYNAMIC_CORE list of OpenBLAS on Linux
-# (Makefile.system) with NO_SME.
-ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
+# The arm64 cores of the Linux archives, as DYNAMIC_LIST (OpenBLAS adds ARMV8,
+# the baseline for any other CPU). It is the default DYNAMIC_CORE list of
+# OpenBLAS without ARMV8SVE and ARMV9SME (ARM64_LINUX_EXCLUDED_CORES), plus the
+# cores that the default list maps to other tables (CORTEXA55 to CORTEXA53;
+# CORTEXA72, CORTEXA73, and FALKOR to CORTEXA57), which DYNAMIC_LIST would map
+# to ARMV8 instead.
+ARM64_LINUX_DYNAMIC_LIST="CORTEXA53 CORTEXA55 CORTEXA57 CORTEXA72 CORTEXA73 FALKOR NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 A64FX THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
+
+# The arm64 cores that the Linux archives leave out, so that their CPUs use
+# other kernels:
+#   ARMV8SVE  the generic SVE core, which OpenBLAS selects for SVE CPUs whose
+#             part number it does not know. On the OpenBLAS commit of this
+#             build, its SSYRK and SSYR2K results are wrong at SVE vector
+#             lengths of 256 and 512 bits, and its DSYRK and DSYR2K results at
+#             512 bits (sblat3 and dblat3 under qemu-aarch64 with
+#             sve-default-vector-length=32 and 64, built by clang and by GCC);
+#             the commit before OpenMathLib/OpenBLAS#5573 is wrong at 512 bits.
+#             These CPUs use the ARMV8 kernels.
+#   ARMV9SME  see NO_SME in build_variant
+ARM64_LINUX_EXCLUDED_CORES="ARMV8SVE ARMV9SME"
+
+# The arm64 cores whose level-3 BLAS tests run with each of the SVE vector
+# lengths of ARM64_SVE_VECTOR_BYTES (128, 256, and 512 bits): the SVE cores,
+# whose kernels depend on the vector length, and CORTEXA72, whose DGEMM kernel
+# the default list of OpenBLAS leaves out.
+ARM64_BLAS3_CORES="NEOVERSEV1 NEOVERSEN2 A64FX CORTEXA72"
+ARM64_SVE_VECTOR_BYTES="16 32 64"
 
 VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
 
@@ -180,6 +204,39 @@ function link_fortran_runtime() {
   printf '%s\n' 'list(APPEND OpenBLAS_LIBRARIES ${_OpenBLAS_ROOT_DIR}/lib/libflang_rt.runtime.a)' >>"${cmake}"
 }
 
+# Fail when the archive has the dispatch table gotoblas_<core> of a core that
+# the build leaves out.
+function check_kernel_cores_absent() {
+  local lib="${1}"
+  shift
+  local symbols
+  symbols="$(archive_symbols "${lib}" --defined-only)" || return
+  local core
+  local present=()
+  for core in "$@"; do
+    if grep -qx "gotoblas_${core}" <<<"${symbols}"; then
+      present+=("${core}")
+    fi
+  done
+  if ((${#present[@]} > 0)); then
+    printf 'ERROR: %s has the kernels of the left-out cores: %s\n' "${lib}" "${present[*]}" >&2
+    return 1
+  fi
+}
+
+# Fail when a core list names a core that the build leaves out.
+function check_excluded_cores() {
+  local list="${1}"
+  local excluded="${2}"
+  local core
+  for core in ${excluded}; do
+    if [[ " ${list} " == *" ${core} "* ]]; then
+      printf 'ERROR: the core list "%s" names %s, which the build leaves out\n' "${list}" "${core}" >&2
+      return 1
+    fi
+  done
+}
+
 # Run the checks of OpenBLAS on an installed archive.
 function check_archive() {
   local install_dir="${1}"
@@ -268,15 +325,18 @@ function build_variant() {
   done < <(variant_make_vars "${variant}")
 
   local cores=()
+  local excluded_cores=()
+  local blas3_cores=()
   case "${CROSS_TARGET}" in
   aarch64-apple* | aarch64-darwin*)
     make_vars+=(TARGET=VORTEX)
     ;;
   aarch64*)
-    # DYNAMIC_ARCH builds every arm64 kernel of OpenBLAS, including the SVE
-    # ones. ARMV8 is the runtime baseline for any other CPU.
-    make_vars+=(TARGET=ARMV8)
-    read -ra cores <<<"${ARM64_LINUX_CORES}"
+    check_excluded_cores "${ARM64_LINUX_DYNAMIC_LIST}" "${ARM64_LINUX_EXCLUDED_CORES}"
+    make_vars+=(TARGET=ARMV8 "DYNAMIC_LIST=${ARM64_LINUX_DYNAMIC_LIST}")
+    read -ra cores <<<"ARMV8 ${ARM64_LINUX_DYNAMIC_LIST}"
+    read -ra excluded_cores <<<"${ARM64_LINUX_EXCLUDED_CORES}"
+    read -ra blas3_cores <<<"${ARM64_BLAS3_CORES}"
     ;;
   x86_64*)
     local dynamic_list
@@ -285,8 +345,8 @@ function build_variant() {
     read -ra cores <<<"PRESCOTT ${dynamic_list}"
     ;;
   esac
-  # NO_SME leaves out the ARMV9SME core, and SME CPUs use the SVE or Neoverse
-  # N1 kernels. Its single-precision direct kernels (SGEMM, SSYMM, SSYRK,
+  # NO_SME leaves out the ARMV9SME core, and SME CPUs use the kernels of their
+  # SVE or Neoverse N1 core. Its single-precision direct kernels (SGEMM, SSYMM, SSYRK,
   # SSYR2K, STRMM) return without computing when GCC compiles them
   # (OpenMathLib/OpenBLAS#6099). Compiled by clang, its GEMM kernels compute
   # correct dgemm and sgemm results only with a streaming vector length of 512
@@ -315,10 +375,17 @@ function build_variant() {
   link_fortran_runtime "${install_dir}"
 
   check_archive "${install_dir}" "${build_dir}/check" ${cores[@]+"${cores[@]}"}
+  if ((${#excluded_cores[@]} > 0)); then
+    check_kernel_cores_absent "${install_dir}/lib/libopenblas.a" "${excluded_cores[@]}"
+  fi
 
   check_direct_execution "${build_dir}/check/consumer-check"
   ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
     log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
+  if ((${#blas3_cores[@]} > 0)); then
+    # shellcheck disable=SC2086 # the vector lengths are words
+    check_blas3_vector_lengths "${src_dir}/test" "${build_dir}/blas3" "${blas3_cores[*]}" ${ARM64_SVE_VECTOR_BYTES}
+  fi
 
   local archive="${outdir}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
   package "${install_dir}" "${archive}"

@@ -32,7 +32,12 @@ Every build checks each archive:
 - a C program (`scripts/consumer-check.c`) that calls `dgemm_`, `sgemm_`, `dsyev_`, `dgttrf_`, and `dgttrs_` links both archives, needs no shared library beyond glibc 2.17 (gnu) or none (musl), and computes the known results: natively on x86_64, and under `qemu-aarch64` on aarch64, there once with the detected core and once with each core forced through `OPENBLAS_CORETYPE`
 - the OpenBLAS tests pass (`make tests`: the BLAS, CBLAS, and unit tests). Their makefiles start the test programs directly, so on aarch64 the build machine needs a binfmt_misc handler for `qemu-aarch64`
 
-The aarch64 archives leave out the `ARMV9SME` kernels (`NO_SME=1`), so CPUs with SME use the SVE or Neoverse N1 kernels: the SME GEMM kernels of OpenBLAS compute correct results only with a streaming vector length of 512 bits, while OpenBLAS selects them on any CPU with SME.
+The aarch64 archives leave out two cores, whose kernels compute wrong results on some CPUs that OpenBLAS selects them for:
+
+- `ARMV9SME` (`NO_SME=1`): the SME GEMM kernels are correct only with a streaming vector length of 512 bits, while OpenBLAS selects them on any CPU with SME. These CPUs use the kernels of their SVE or Neoverse N1 core
+- `ARMV8SVE`, the generic SVE core for SVE CPUs that OpenBLAS does not recognize: its SSYRK and SSYR2K kernels are wrong at SVE vector lengths above 128 bits, and its DSYRK and DSYR2K kernels at 512 bits. These CPUs use the `ARMV8` kernels
+
+The aarch64 builds also run the level-3 BLAS tests of the remaining SVE cores (`NEOVERSEV1`, `NEOVERSEN2`, `A64FX`) and of `CORTEXA72` under `qemu-aarch64` at SVE vector lengths of 128, 256, and 512 bits.
 
 The macOS and Windows images still carry GCC toolchains, and `scripts/main` builds only targets whose image provides clang, flang, and flang-rt.
 

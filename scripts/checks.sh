@@ -200,6 +200,38 @@ function run_on_target() {
   fi
 }
 
+# Run the level-3 BLAS tests sblat3 and dblat3 of OpenBLAS (built in a test
+# directory) with each of the given cores, forced through OPENBLAS_CORETYPE, at
+# each of the given SVE vector lengths in bytes, which qemu-aarch64 sets with
+# sve-default-vector-length. Fail on a test failure.
+function check_blas3_vector_lengths() {
+  local test_dir="${1}"
+  local work_dir="${2}"
+  local core_list="${3}"
+  shift 3
+  rm -rf "${work_dir}"
+  mkdir -p "${work_dir}"
+  cp "${test_dir}/sblat3" "${test_dir}/dblat3" "${test_dir}/sblat3.dat" "${test_dir}/dblat3.dat" "${work_dir}/" || return
+  local core
+  local bytes
+  local test
+  for core in ${core_list}; do
+    for bytes in "$@"; do
+      for test in sblat3 dblat3; do
+        rm -f "${work_dir}/"*.SUMM
+        if ! (cd "${work_dir}" && OPENBLAS_CORETYPE="${core}" OPENBLAS_NUM_THREADS=1 \
+          QEMU_CPU="max,sve-default-vector-length=${bytes}" run_on_target "./${test}" <"${test}.dat" >/dev/null 2>&1) ||
+          grep -qE 'FAIL|FATAL' "${work_dir}/"*.SUMM; then
+          printf 'ERROR: %s fails with OPENBLAS_CORETYPE=%s at an SVE vector length of %s bytes:\n' "${test}" "${core}" "${bytes}" >&2
+          grep -E 'FAIL|FATAL' "${work_dir}/"*.SUMM >&2
+          return 1
+        fi
+      done
+      printf 'Level-3 BLAS tests of %s pass at an SVE vector length of %s bytes\n' "${core}" "${bytes}"
+    done
+  done
+}
+
 # Fail unless the build machine runs a program of the target without
 # TARGET_RUNNER, as the makefiles of the OpenBLAS tests start their programs: an
 # emulated target needs a binfmt_misc handler for the emulator on the build
