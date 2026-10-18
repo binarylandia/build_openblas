@@ -32,6 +32,8 @@ Every build checks each archive:
 - a C program (`scripts/consumer-check.c`) that calls `dgemm_`, `sgemm_`, `dsyev_`, `dgttrf_`, and `dgttrs_` links both archives, needs no shared library beyond glibc 2.17 (gnu) or none (musl), and computes the known results: natively on x86_64, and under `qemu-aarch64` on aarch64, there once with the detected core and once with each core forced through `OPENBLAS_CORETYPE`
 - the OpenBLAS tests pass (`make tests`: the BLAS, CBLAS, and unit tests). On aarch64 they run through the `qemu-aarch64` binfmt_misc handler of the build machine, which must be registered
 
+The aarch64 archives leave out the `ARMV9SME` kernels (`NO_SME=1`), so CPUs with SME use the SVE or Neoverse N1 kernels: the SME GEMM kernels of OpenBLAS compute correct results only with a streaming vector length of 512 bits, while OpenBLAS selects them on any CPU with SME.
+
 The macOS and Windows images still carry GCC toolchains, and `scripts/main` builds only targets whose image provides clang, flang, and flang-rt.
 
 ## WebAssembly

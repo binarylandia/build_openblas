@@ -3,16 +3,14 @@
 // against values known in advance. Character arguments carry their hidden
 // lengths, as the Fortran calling convention of gfortran and flang passes them.
 //
-// Prints the OpenBLAS core in use and exits with status 1 on the first wrong
-// result. With an argument, it also fails unless the core in use has that name,
-// so that OPENBLAS_CORETYPE=<core> checks the kernels of one core.
+// Prints the OpenBLAS core in use, which OPENBLAS_CORETYPE selects, and exits
+// with status 1 after the checks when a result is wrong.
 
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 void dgemm_(const char *transa, const char *transb, const int *m, const int *n, const int *k,
             const double *alpha, const double *a, const int *lda, const double *b, const int *ldb,
@@ -214,13 +212,8 @@ static void check_dgttrs(const char *trans) {
   }
 }
 
-int main(int argc, char **argv) {
-  const char *core = openblas_get_corename();
-  printf("core: %s\n", core);
-  if (argc > 1 && strcasecmp(core, argv[1]) != 0) {
-    printf("FAIL core: got %s, expected %s\n", core, argv[1]);
-    return 1;
-  }
+int main(void) {
+  printf("core: %s\n", openblas_get_corename());
   check_dgemm_small();
   check_gemm("N", 1);
   check_gemm("T", 1);

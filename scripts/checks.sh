@@ -130,10 +130,33 @@ function check_system_dependencies() {
   esac
 }
 
+# Run the consumer check program, with the core given by OPENBLAS_CORETYPE when
+# a core is given, print its output, and print the name of the OpenBLAS core in
+# use to the file descriptor 3.
+function run_consumer_check() {
+  local program="${1}"
+  local core="${2:-}"
+  local output
+  output="$(
+    if [[ -n "${core}" ]]; then
+      export OPENBLAS_CORETYPE="${core}"
+    fi
+    run_on_target "${program}" 2>&1
+  )" || {
+    printf '%s\nERROR: %s failed%s\n' "${output}" "${program}" "${core:+ with OPENBLAS_CORETYPE=${core}}" >&2
+    return 1
+  }
+  printf '%s\n' "${output}"
+  sed -n 's/^core: //p' <<<"${output}" >&3
+}
+
 # Link the consumer check program against the installed archives as a consumer
 # does, check its system dependencies, and run it: with the core that OpenBLAS
 # detects, and, when the program runs in an emulator that implements every
-# instruction set of the target, with each of the given kernel cores.
+# instruction set of the target, with each of the given kernel cores, forced
+# through OPENBLAS_CORETYPE. A forced core that leaves the detected one in use
+# was not applied. Its reported name may differ from the forced one, because
+# OpenBLAS reports the first core that shares the kernel table.
 function check_consumer() {
   local install_dir="${1}"
   local work_dir="${2}"
@@ -149,19 +172,19 @@ function check_consumer() {
     "${install_dir}/lib/libopenblas.a" "${install_dir}/lib/libflang_rt.runtime.a" -lm -lpthread ${link_flags} || return
   check_system_dependencies "${program}" || return
 
-  run_on_target "${program}" || {
-    printf 'ERROR: %s failed\n' "${program}" >&2
-    return 1
-  }
+  local detected
+  detected="$(run_consumer_check "${program}" 3>&1 >&2)" || return
   if [[ -z "${TARGET_RUNNER}" ]]; then
     return
   fi
   local core
+  local used
   for core in ${cores[@]+"${cores[@]}"}; do
-    OPENBLAS_CORETYPE="${core}" run_on_target "${program}" "${core}" || {
-      printf 'ERROR: %s failed with OPENBLAS_CORETYPE=%s\n' "${program}" "${core}" >&2
+    used="$(run_consumer_check "${program}" "${core}" 3>&1 >&2)" || return
+    if [[ "${used}" == "${detected}" && "${core,,}" != "${detected,,}" ]]; then
+      printf 'ERROR: OPENBLAS_CORETYPE=%s left the detected core %s in use\n' "${core}" "${detected}" >&2
       return 1
-    }
+    fi
   done
 }
 

@@ -56,8 +56,8 @@ export CCACHE_NOCOMPRESS="1"
 export CCACHE_MAXSIZE="50G"
 
 # The cores of the arm64 DYNAMIC_CORE list of OpenBLAS on Linux
-# (Makefile.system).
-ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX ARMV9SME THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
+# (Makefile.system) with NO_SME.
+ARM64_LINUX_CORES="ARMV8 CORTEXA53 CORTEXA57 NEOVERSEN1 NEOVERSEV1 NEOVERSEN2 ARMV8SVE A64FX THUNDERX THUNDERX2T99 TSV110 EMAG8180 THUNDERX3T110"
 
 VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
 
@@ -274,7 +274,7 @@ function build_variant() {
     ;;
   aarch64*)
     # DYNAMIC_ARCH builds every arm64 kernel of OpenBLAS, including the SVE
-    # and SME ones. ARMV8 is the runtime baseline for any other CPU.
+    # ones. ARMV8 is the runtime baseline for any other CPU.
     make_vars+=(TARGET=ARMV8)
     read -ra cores <<<"${ARM64_LINUX_CORES}"
     ;;
@@ -285,6 +285,16 @@ function build_variant() {
     read -ra cores <<<"PRESCOTT ${dynamic_list}"
     ;;
   esac
+  # NO_SME leaves out the ARMV9SME core, and SME CPUs use the SVE or Neoverse
+  # N1 kernels. Its single-precision direct kernels (SGEMM, SSYMM, SSYRK,
+  # SSYR2K, STRMM) return without computing when GCC compiles them
+  # (OpenMathLib/OpenBLAS#6099). Compiled by clang, its GEMM kernels compute
+  # correct dgemm and sgemm results only with a streaming vector length of 512
+  # bits, as on Apple M4, and wrong ones with 128, 256, 1024, and 2048 bits,
+  # while the dispatch selects the core on any CPU with SME.
+  if [[ "${CROSS_TARGET}" == aarch64* ]]; then
+    make_vars+=(NO_SME=1)
+  fi
   if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
     make_vars+=(CONSISTENT_FPCSR=1)
   fi
