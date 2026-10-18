@@ -67,23 +67,16 @@ INTRINSIC_MODULES=(
   flang_debug
 )
 
-# Rebuild the intrinsic modules for the target, with REAL(KIND=16) when the long
-# double of the target has a 113-bit mantissa, as the flang build decides.
+# Rebuild the intrinsic modules for the target, without the REAL(KIND=16)
+# procedures (the -DFLANG_SUPPORT_R16 of the flang build), because flang-rt is
+# built without REAL(16) math.
 function build_intrinsic_modules() {
   local src_dir="${1}"
   local triple="${2}"
-  local bin="${LLVM_DIR}/bin"
-  local module_dir="${LLVM_DIR}/include/flang"
-  local mantissa
-  mantissa="$("${bin}/clang" --target="${triple}" -dM -E -x c /dev/null | awk '$2 == "__LDBL_MANT_DIG__" {print $3}')"
-  local defines=()
-  if [[ "${mantissa}" == "113" ]]; then
-    defines+=(-DFLANG_SUPPORT_R16)
-  fi
   local module
   for module in "${INTRINSIC_MODULES[@]}"; do
-    "${bin}/flang" --target="${triple}" ${defines[@]+"${defines[@]}"} -cpp -fsyntax-only \
-      -module-dir "${module_dir}" "${src_dir}/flang/module/${module}.f90"
+    "${LLVM_DIR}/bin/flang" --target="${triple}" -cpp -fsyntax-only \
+      -module-dir "${LLVM_DIR}/include/flang" "${src_dir}/flang/module/${module}.f90"
   done
 }
 
