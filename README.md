@@ -10,7 +10,7 @@ Every target builds the same OpenBLAS source: develop commit `de5d4914`, the 432
 
 - **plain**: Single-threaded, standard LAPACK
 - **threads**: Multi-threaded (up to 64 threads)
-- **relapack**: ReLAPACK recursive algorithms
+- **relapack**: ReLAPACK recursive algorithms in place of the LAPACK ones they cover; GEMMT stays the one of OpenBLAS
 - **threads-relapack**: Multi-threaded with ReLAPACK
 
 ## Linux targets
