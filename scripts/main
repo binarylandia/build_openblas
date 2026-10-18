@@ -76,12 +76,13 @@ ARM64_LINUX_DYNAMIC_LIST="CORTEXA53 CORTEXA55 CORTEXA57 CORTEXA72 CORTEXA73 FALK
 #   ARMV9SME  see NO_SME in build_variant
 ARM64_LINUX_EXCLUDED_CORES="ARMV8SVE ARMV9SME"
 
-# The arm64 cores whose level-3 BLAS tests run with each of the SVE vector
-# lengths of ARM64_SVE_VECTOR_BYTES (128, 256, and 512 bits): the SVE cores,
-# whose kernels depend on the vector length, and CORTEXA72, whose DGEMM kernel
-# the default list of OpenBLAS leaves out.
-ARM64_BLAS3_CORES="NEOVERSEV1 NEOVERSEN2 A64FX CORTEXA72"
-ARM64_SVE_VECTOR_BYTES="16 32 64"
+# The level-3 BLAS tests of arm64 cores at SVE vector lengths, as
+# <core>:<bytes>,...: the SVE cores, whose kernels depend on the vector length,
+# at 128, 256, and 512 bits, and CORTEXA72, whose DGEMM kernel the default list
+# of OpenBLAS leaves out, once. NEOVERSEV1 runs without 512 bits: its DSYRK and
+# DSYR2K results are wrong there (dblat3), but OpenBLAS selects it only for
+# Neoverse V1, whose SVE vector length is 256 bits.
+ARM64_BLAS3_RUNS="NEOVERSEV1:16,32 NEOVERSEN2:16,32,64 A64FX:16,32,64 CORTEXA72:16"
 
 VARIANTS="${VARIANTS:-plain threads relapack threads-relapack}"
 
@@ -326,7 +327,7 @@ function build_variant() {
 
   local cores=()
   local excluded_cores=()
-  local blas3_cores=()
+  local blas3_runs=()
   case "${CROSS_TARGET}" in
   aarch64-apple* | aarch64-darwin*)
     make_vars+=(TARGET=VORTEX)
@@ -336,7 +337,7 @@ function build_variant() {
     make_vars+=(TARGET=ARMV8 "DYNAMIC_LIST=${ARM64_LINUX_DYNAMIC_LIST}")
     read -ra cores <<<"ARMV8 ${ARM64_LINUX_DYNAMIC_LIST}"
     read -ra excluded_cores <<<"${ARM64_LINUX_EXCLUDED_CORES}"
-    read -ra blas3_cores <<<"${ARM64_BLAS3_CORES}"
+    read -ra blas3_runs <<<"${ARM64_BLAS3_RUNS}"
     ;;
   x86_64*)
     local dynamic_list
@@ -382,9 +383,8 @@ function build_variant() {
   check_direct_execution "${build_dir}/check/consumer-check"
   ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
     log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
-  if ((${#blas3_cores[@]} > 0)); then
-    # shellcheck disable=SC2086 # the vector lengths are words
-    check_blas3_vector_lengths "${src_dir}/test" "${build_dir}/blas3" "${blas3_cores[*]}" ${ARM64_SVE_VECTOR_BYTES}
+  if ((${#blas3_runs[@]} > 0)); then
+    check_blas3_vector_lengths "${src_dir}/test" "${build_dir}/blas3" "${blas3_runs[@]}"
   fi
 
   local archive="${outdir}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"

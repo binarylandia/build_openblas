@@ -201,22 +201,25 @@ function run_on_target() {
 }
 
 # Run the level-3 BLAS tests sblat3 and dblat3 of OpenBLAS (built in a test
-# directory) with each of the given cores, forced through OPENBLAS_CORETYPE, at
-# each of the given SVE vector lengths in bytes, which qemu-aarch64 sets with
-# sve-default-vector-length. Fail on a test failure.
+# directory) for runs given as <core>:<bytes>,...: with the core forced through
+# OPENBLAS_CORETYPE, at each SVE vector length in bytes, which qemu-aarch64 sets
+# with sve-default-vector-length. Fail on a test failure.
 function check_blas3_vector_lengths() {
   local test_dir="${1}"
   local work_dir="${2}"
-  local core_list="${3}"
-  shift 3
+  shift 2
   rm -rf "${work_dir}"
   mkdir -p "${work_dir}"
   cp "${test_dir}/sblat3" "${test_dir}/dblat3" "${test_dir}/sblat3.dat" "${test_dir}/dblat3.dat" "${work_dir}/" || return
+  local run
   local core
+  local lengths
   local bytes
   local test
-  for core in ${core_list}; do
-    for bytes in "$@"; do
+  for run in "$@"; do
+    core="${run%%:*}"
+    IFS=, read -ra lengths <<<"${run#*:}"
+    for bytes in "${lengths[@]}"; do
       for test in sblat3 dblat3; do
         rm -f "${work_dir}/"*.SUMM
         if ! (cd "${work_dir}" && OPENBLAS_CORETYPE="${core}" OPENBLAS_NUM_THREADS=1 \
