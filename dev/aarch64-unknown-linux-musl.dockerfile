@@ -53,7 +53,7 @@ ENV TRIPLET="aarch64-unknown-linux-musl"
 ENV GCC_DIR="/opt/gcc"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${GCC_DIR}" \
-&& fetch "https://github.com/binarylandia/build_crosstool-ng/releases/download/gcc-14.4.0-2026-10-17_22-58-35/gcc-14.4.0-${TRIPLET}-2026-10-17_22-58-35.tar.xz" "bf0800e0da1f3212c311da288fd5a3aad978eb18ded0533d332852ff7d1a1bab" /tmp/download \
+&& fetch "https://github.com/binarylandia/build_crosstool-ng/releases/download/gcc-14.4.0-2026-10-18_01-15-48/gcc-14.4.0-${TRIPLET}-2026-10-18_01-15-48.tar.xz" "a58ac13a747aeef152359c2951938f8b43ba9e7e7357a14c4fd26ff72c969c12" /tmp/download \
 && tar -C "${GCC_DIR}" -xJf /tmp/download \
 && rm /tmp/download \
 && ls ${GCC_DIR}/bin/${TRIPLET}-gcc \
