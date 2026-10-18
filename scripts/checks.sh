@@ -165,12 +165,21 @@ function check_consumer() {
   local program="${work_dir}/consumer-check"
   mkdir -p "${work_dir}"
 
+  local lib="${install_dir}/lib/libopenblas.a"
+  local flang_rt="${install_dir}/lib/libflang_rt.runtime.a"
   local link_flags
   link_flags="$(program_link_flags)"
   # shellcheck disable=SC2086 # the link flags are words
-  ${CC} -O2 -o "${program}" "${CONSUMER_CHECK_SOURCE}" \
-    "${install_dir}/lib/libopenblas.a" "${install_dir}/lib/libflang_rt.runtime.a" -lm -lpthread ${link_flags} || return
+  ${CC} -O2 -o "${program}" "${CONSUMER_CHECK_SOURCE}" "${lib}" "${flang_rt}" -lm -lpthread ${link_flags} || return
   check_system_dependencies "${program}" || return
+
+  # The program again with every object of libopenblas.a, so that every
+  # function of OpenBLAS links with flang-rt and the system libraries alone.
+  local program_all="${work_dir}/consumer-check-all"
+  local whole_archive=("-Wl,--whole-archive" "${lib}" "-Wl,--no-whole-archive")
+  # shellcheck disable=SC2086 # the link flags are words
+  ${CC} -O2 -o "${program_all}" "${CONSUMER_CHECK_SOURCE}" "${whole_archive[@]}" "${flang_rt}" -lm -lpthread ${link_flags} || return
+  check_system_dependencies "${program_all}" || return
 
   local detected
   detected="$(run_consumer_check "${program}" 3>&1 >&2)" || return
