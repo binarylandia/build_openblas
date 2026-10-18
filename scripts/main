@@ -164,6 +164,28 @@ function prepare_source() {
     return 1
   fi
 
+  # The makefiles of the OpenBLAS tests start the test programs directly: a
+  # recipe line names ./<program> after environment assignments only
+  # (OPENBLAS_NUM_THREADS=1 ./sblat1$(EXE)). Start them through
+  # $(TARGET_RUNNER) instead, the emulator of the target (qemu-aarch64), which
+  # is empty for programs that run directly.
+  local makefile
+  local direct
+  local runs
+  for makefile in test/Makefile ctest/Makefile utest/Makefile; do
+    # shellcheck disable=SC2016 # $(TARGET_RUNNER) is a make variable
+    sed -i -E 's|^(\t([A-Z_]+=[^[:space:]]*[[:space:]]+)*)\./|\1$(TARGET_RUNNER) ./|' "${src_dir}/${makefile}"
+    # grep -c prints 0 and exits with 1 when no line matches.
+    direct="$(grep -cP '^\t([A-Z_]+=\S*\s+)*\./' "${src_dir}/${makefile}")" || true
+    # shellcheck disable=SC2016 # $(TARGET_RUNNER) is a make variable
+    runs="$(grep -cP '^\t([A-Z_]+=\S*\s+)*\$\(TARGET_RUNNER\) \./' "${src_dir}/${makefile}")" || true
+    if ((direct > 0 || runs == 0)); then
+      # shellcheck disable=SC2016 # $(TARGET_RUNNER) is a make variable
+      printf 'ERROR: %s starts %s test programs directly and %s through $(TARGET_RUNNER); update the edit for this OpenBLAS version.\n' "${src_dir}/${makefile}" "${direct}" "${runs}" >&2
+      return 1
+    fi
+  done
+
   # On macOS, OpenBLAS ends every x86_64 assembly kernel with the
   # .subsections_via_symbols directive, which lets the linker split a section
   # into one piece per symbol. The kernels name their branch targets with .L
@@ -400,8 +422,7 @@ function build_variant() {
     check_kernel_cores_absent "${install_dir}/lib/libopenblas.a" "${excluded_cores[@]}"
   fi
 
-  check_direct_execution "${build_dir}/check/consumer-check"
-  ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
+  ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 "TARGET_RUNNER=${TARGET_RUNNER}" LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
     log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
   if ((${#blas3_runs[@]} > 0)); then
     check_blas3_vector_lengths "${src_dir}/test" "${build_dir}/blas3" "${blas3_runs[@]}"

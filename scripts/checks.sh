@@ -234,18 +234,3 @@ function check_blas3_vector_lengths() {
     done
   done
 }
-
-# Fail unless the build machine runs a program of the target without
-# TARGET_RUNNER, as the makefiles of the OpenBLAS tests start their programs: an
-# emulated target needs a binfmt_misc handler for the emulator on the build
-# machine.
-function check_direct_execution() {
-  local program="${1}"
-  if [[ -z "${TARGET_RUNNER}" ]]; then
-    return
-  fi
-  if ! "${program}" >/dev/null 2>&1; then
-    printf 'ERROR: the build machine cannot run %s directly; the OpenBLAS tests of %s need a binfmt_misc handler for %s\n' "${program}" "${CROSS_TARGET}" "${TARGET_RUNNER}" >&2
-    return 1
-  fi
-}
