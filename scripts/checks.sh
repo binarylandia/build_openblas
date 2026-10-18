@@ -200,18 +200,17 @@ function run_on_target() {
   fi
 }
 
-# Fail unless the build machine can run the test programs of OpenBLAS, which
-# its makefiles start directly: an emulated target needs a binfmt_misc handler
-# for the emulator.
-function check_test_runner() {
-  local runner=()
-  read -ra runner <<<"${TARGET_RUNNER?}"
-  if ((${#runner[@]} == 0)); then
+# Fail unless the build machine runs a program of the target without
+# TARGET_RUNNER, as the makefiles of the OpenBLAS tests start their programs: an
+# emulated target needs a binfmt_misc handler for the emulator on the build
+# machine.
+function check_direct_execution() {
+  local program="${1}"
+  if [[ -z "${TARGET_RUNNER}" ]]; then
     return
   fi
-  local handler="/proc/sys/fs/binfmt_misc/${runner[0]##*/}"
-  if [[ ! -f "${handler}" ]] || ! grep -qx 'enabled' "${handler}"; then
-    printf 'ERROR: the OpenBLAS tests of %s run through binfmt_misc, but the build machine has no enabled handler %s\n' "${CROSS_TARGET}" "${handler}" >&2
+  if ! "${program}" >/dev/null 2>&1; then
+    printf 'ERROR: the build machine cannot run %s directly; the OpenBLAS tests of %s need a binfmt_misc handler for %s\n' "${program}" "${CROSS_TARGET}" "${TARGET_RUNNER}" >&2
     return 1
   fi
 }

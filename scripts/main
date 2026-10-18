@@ -316,7 +316,7 @@ function build_variant() {
 
   check_archive "${install_dir}" "${build_dir}/check" ${cores[@]+"${cores[@]}"}
 
-  check_test_runner
+  check_direct_execution "${build_dir}/check/consumer-check"
   ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
     log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
 
