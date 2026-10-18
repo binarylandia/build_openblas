@@ -6,9 +6,15 @@
 # programs for a target, from the source release of the installed LLVM, and
 # install them where the drivers look for them:
 #
-#   include/flang/*.mod                                    Fortran intrinsic modules
-#   lib/clang/<major>/lib/<triple>/libflang_rt.runtime.a   Fortran runtime
-#   lib/clang/<major>/lib/<triple>/libclang_rt.builtins.a  compiler-rt builtins
+#   include/flang/*.mod                      Fortran intrinsic modules
+#   lib/clang/<major>/lib/<dir>/libflang_rt.runtime.a
+#                                            Fortran runtime
+#   lib/clang/<major>/lib/<dir>/libclang_rt.builtins.a
+#                                            compiler-rt builtins (Linux only)
+#
+# <dir> is the target triple on Linux and Windows, and darwin on macOS. The
+# macOS and MinGW toolchains ship their compiler-rt builtins, so only Linux
+# targets build them here.
 #
 # flang reads the intrinsic modules (iso_c_binding, ieee_arithmetic, and
 # others) only from the include/flang directory next to its executable, and
@@ -19,15 +25,21 @@
 #
 # Both are static archives of position-independent code. flang-rt has no shared
 # library and no REAL(16) math, which would need libquadmath. The flang driver
-# links the builtins after libgcc on aarch64, so a Fortran program links only
-# when the builtins of the target exist.
+# links the builtins after libgcc on aarch64 Linux, so a Fortran program links
+# only when the builtins of the target exist.
 #
 # The compilers are clang, clang++, and flang of LLVM_DIR (default /opt/llvm)
-# with --target=<triple>, which load the configuration <triple>.cfg from the
-# bin directory of LLVM_DIR (sysroot, GCC installation, linker).
+# with --target=<triple>, which load the configuration files <triple>.cfg or
+# <triple>-flang.cfg from the bin directory of LLVM_DIR (sysroot, GCC
+# installation, linker). On macOS, C and C++ go through the osxcross wrappers
+# <triple>-clang and <triple>-clang++ on PATH, which add the SDK and its C++
+# headers, and SDKROOT and MACOSX_DEPLOYMENT_TARGET name the SDK and the oldest
+# macOS version.
 #
 # Examples:
 #   $0 /tmp/llvm-project-22.1.8.src.tar.xz aarch64-unknown-linux-gnu
+#   $0 /tmp/llvm-project-22.1.8.src.tar.xz arm64-apple-darwin20.2
+#   $0 /tmp/llvm-project-22.1.8.src.tar.xz x86_64-w64-mingw32
 #
 set -euo pipefail
 trap "exit" INT
@@ -80,6 +92,65 @@ function build_intrinsic_modules() {
   done
 }
 
+# Print the CMake arguments that select the compilers and the system of the
+# target, and the runtimes to build.
+function target_cmake_args() {
+  local triple="${1}"
+  local bin="${LLVM_DIR}/bin"
+  local arch="${triple%%-*}"
+  local fortran=(
+    -DCMAKE_Fortran_COMPILER="${bin}/flang"
+    -DCMAKE_Fortran_COMPILER_TARGET="${triple}"
+  )
+  local clang=(
+    -DCMAKE_C_COMPILER="${bin}/clang"
+    -DCMAKE_C_COMPILER_TARGET="${triple}"
+    -DCMAKE_CXX_COMPILER="${bin}/clang++"
+    -DCMAKE_CXX_COMPILER_TARGET="${triple}"
+    -DCMAKE_ASM_COMPILER_TARGET="${triple}"
+  )
+  case "${triple}" in
+  *-linux-*)
+    printf '%s\n' "${clang[@]}" "${fortran[@]}" \
+      -DCMAKE_SYSTEM_NAME=Linux \
+      -DCMAKE_SYSTEM_PROCESSOR="${arch}" \
+      -DLLVM_DEFAULT_TARGET_TRIPLE="${triple}" \
+      -DLLVM_ENABLE_RUNTIMES="compiler-rt;flang-rt"
+    ;;
+  *-apple-darwin*)
+    local wrapper
+    wrapper="$(command -v "${triple}-clang")" || {
+      printf 'ERROR: no osxcross wrapper %s-clang on PATH\n' "${triple}" >&2
+      return 1
+    }
+    printf '%s\n' "${fortran[@]}" \
+      -DCMAKE_C_COMPILER="${wrapper}" \
+      -DCMAKE_CXX_COMPILER="${wrapper}++" \
+      -DCMAKE_SYSTEM_NAME=Darwin \
+      -DCMAKE_SYSTEM_PROCESSOR="${arch}" \
+      -DCMAKE_OSX_SYSROOT="${SDKROOT:?SDKROOT names the macOS SDK}" \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:?MACOSX_DEPLOYMENT_TARGET names the oldest macOS version}" \
+      -DLLVM_DEFAULT_TARGET_TRIPLE="${triple}" \
+      -DLLVM_ENABLE_RUNTIMES="flang-rt"
+    ;;
+  *-w64-mingw32)
+    # The library directory of the drivers is named by the normalized triple
+    # (x86_64-w64-windows-gnu).
+    local normalized
+    normalized="$("${bin}/clang" --target="${triple}" -print-target-triple)" || return
+    printf '%s\n' "${clang[@]}" "${fortran[@]}" \
+      -DCMAKE_SYSTEM_NAME=Windows \
+      -DCMAKE_SYSTEM_PROCESSOR="${arch}" \
+      -DLLVM_DEFAULT_TARGET_TRIPLE="${normalized}" \
+      -DLLVM_ENABLE_RUNTIMES="flang-rt"
+    ;;
+  *)
+    printf 'ERROR: no runtimes build for %s\n' "${triple}" >&2
+    return 1
+    ;;
+  esac
+}
+
 function configure() {
   local src_dir="${1}"
   local build_dir="${2}"
@@ -87,26 +158,20 @@ function configure() {
   local bin="${LLVM_DIR}/bin"
   local resource_dir
   resource_dir="$("${bin}/clang" -print-resource-dir)"
+  local args
+  args="$(target_cmake_args "${triple}")" || return
+  local target_args=()
+  mapfile -t target_args <<<"${args}"
   cmake -S "${src_dir}/runtimes" -B "${build_dir}" \
+    "${target_args[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${LLVM_DIR}" \
-    -DCMAKE_SYSTEM_NAME=Linux \
-    -DCMAKE_SYSTEM_PROCESSOR="${triple%%-*}" \
-    -DCMAKE_C_COMPILER="${bin}/clang" \
-    -DCMAKE_C_COMPILER_TARGET="${triple}" \
-    -DCMAKE_CXX_COMPILER="${bin}/clang++" \
-    -DCMAKE_CXX_COMPILER_TARGET="${triple}" \
-    -DCMAKE_ASM_COMPILER_TARGET="${triple}" \
-    -DCMAKE_Fortran_COMPILER="${bin}/flang" \
-    -DCMAKE_Fortran_COMPILER_TARGET="${triple}" \
     -DCMAKE_Fortran_COMPILER_WORKS=ON \
     -DCMAKE_AR="${bin}/llvm-ar" \
     -DCMAKE_NM="${bin}/llvm-nm" \
     -DCMAKE_RANLIB="${bin}/llvm-ranlib" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DLLVM_DEFAULT_TARGET_TRIPLE="${triple}" \
     -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
-    -DLLVM_ENABLE_RUNTIMES="compiler-rt;flang-rt" \
     -DLLVM_INCLUDE_TESTS=OFF \
     -DLLVM_INCLUDE_DOCS=OFF \
     -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
@@ -127,6 +192,35 @@ function configure() {
     -DFLANG_RT_INCLUDE_TESTS=OFF \
     -DFLANG_RT_INSTALL_RESOURCE_PATH="${resource_dir}" \
     -DFLANG_RUNTIME_F128_MATH_LIB=""
+}
+
+function build_and_install() {
+  local build_dir="${1}"
+  local triple="${2}"
+  case "${triple}" in
+  *-w64-mingw32)
+    # On Windows, flang-rt builds one archive for each C runtime of MSVC
+    # (flang_rt.runtime.static, .dynamic, and their debug variants), which
+    # differ only when compiled for MSVC, while the MinGW driver links
+    # -lflang_rt.runtime from the library directory of the target.
+    cmake --build "${build_dir}" --parallel "$(nproc)" --target flang_rt.runtime.static
+    local lib
+    lib="$(find "${build_dir}" -name 'libflang_rt.runtime.static.a')" || return
+    if [[ -z "${lib}" || "${lib}" == *$'\n'* ]]; then
+      printf 'ERROR: expected one libflang_rt.runtime.static.a in %s, found: %s\n' "${build_dir}" "${lib:-none}" >&2
+      return 1
+    fi
+    local resource_dir
+    local normalized
+    resource_dir="$("${LLVM_DIR}/bin/clang" -print-resource-dir)" || return
+    normalized="$("${LLVM_DIR}/bin/clang" --target="${triple}" -print-target-triple)" || return
+    install -D -m 0644 "${lib}" "${resource_dir}/lib/${normalized}/libflang_rt.runtime.a"
+    ;;
+  *)
+    cmake --build "${build_dir}" --parallel "$(nproc)"
+    cmake --install "${build_dir}"
+    ;;
+  esac
 }
 
 main() {
@@ -153,8 +247,7 @@ main() {
   extract_source "${tarball}" "${work_dir}/src"
   build_intrinsic_modules "${work_dir}/src" "${triple}"
   configure "${work_dir}/src" "${work_dir}/build" "${triple}"
-  cmake --build "${work_dir}/build" --parallel "$(nproc)"
-  cmake --install "${work_dir}/build"
+  build_and_install "${work_dir}/build" "${triple}"
   install -D -m 0644 "${work_dir}/src/flang-rt/LICENSE.TXT" "${LLVM_DIR}/share/doc/flang-rt/LICENSE.TXT"
 }
 
