@@ -3,10 +3,10 @@
 # Usage: $0 [target...]
 #
 # Build the native archives of the given targets with ./build, by default of
-# every target whose build image has the clang and flang toolchain. JOBS
-# targets build at a time (default 2): each target build uses every CPU, so more
-# at once can run out of memory. All targets share one BUILD_TIME, so
-# scripts/release publishes them together.
+# every native target that builds with clang and flang. JOBS targets build at a
+# time (default 2): each target build uses every CPU, so more at once can run
+# out of memory. All targets share one BUILD_TIME, so scripts/release publishes
+# them together.
 #
 # Examples:
 #   $0
@@ -16,8 +16,12 @@ set -euo pipefail
 trap "exit" INT
 
 DEFAULT_TARGETS=(
+  "aarch64-apple-darwin"
+  "aarch64-pc-windows-gnullvm"
   "aarch64-unknown-linux-gnu"
   "aarch64-unknown-linux-musl"
+  "x86_64-apple-darwin"
+  "x86_64-pc-windows-gnullvm"
   "x86_64-unknown-linux-gnu"
   "x86_64-unknown-linux-musl"
 )

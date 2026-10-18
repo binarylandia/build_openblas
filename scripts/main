@@ -16,15 +16,18 @@
 #
 # The image provides the compilers and tools: CC (clang), FC (flang), HOSTCC
 # (the compiler of the build machine, for the build tools of OpenBLAS), AR, NM,
-# RANLIB, READELF, and TARGET_RUNNER, the command that runs a program of the
-# target on the build machine (empty when it runs directly). Each archive holds
-# libopenblas.a and the Fortran runtime libflang_rt.runtime.a of the flang that
-# compiled LAPACK, so a program that links both needs no other runtime than the
-# C library of the target.
+# RANLIB, READELF, OBJDUMP, READOBJ, TARGET_RUNNER, the command that runs a
+# program of the target on the build machine (empty when it runs directly), and
+# TARGET_NO_RUN, the reason why programs of the target cannot run on the build
+# machine (empty when they can). Each archive holds libopenblas.a and the
+# Fortran runtime libflang_rt.runtime.a of the flang that compiled LAPACK, so a
+# program that links both needs no other runtime than the C library of the
+# target.
 #
 # Examples:
 #   CROSS_TARGET=x86_64-unknown-linux-gnu ./build
 #   CROSS_TARGET=aarch64-unknown-linux-musl ./build 'VARIANTS="plain threads" ./scripts/main'
+#   CROSS_TARGET=x86_64-pc-windows-gnullvm ./build
 #
 set -euo pipefail
 trap "exit" INT
@@ -167,8 +170,8 @@ function prepare_source() {
   # The makefiles of the OpenBLAS tests start the test programs directly: a
   # recipe line names ./<program> after environment assignments only
   # (OPENBLAS_NUM_THREADS=1 ./sblat1$(EXE)). Start them through
-  # $(TARGET_RUNNER) instead, the emulator of the target (qemu-aarch64), which
-  # is empty for programs that run directly.
+  # $(TARGET_RUNNER) instead, the emulator or loader of the target
+  # (qemu-aarch64, Wine), which is empty for programs that run directly.
   local makefile
   local direct
   local runs
@@ -217,6 +220,17 @@ function macho_split_members() {
   comm -12 <(printf '%s\n' "${split}") <(printf '%s\n' "${labeled}")
 }
 
+# Fail unless an archive starts with the BSD symbol table __.SYMDEF, which the
+# linker of Xcode needs to find archive members by symbol. llvm-ar writes it
+# for archives of Mach-O objects.
+function check_bsd_symbol_table() {
+  local lib="${1}"
+  if ! head -c 128 "${lib}" | grep -aq '__\.SYMDEF'; then
+    printf 'ERROR: %s has no BSD symbol table (__.SYMDEF)\n' "${lib}" >&2
+    return 1
+  fi
+}
+
 # Fail when the archive lacks the dispatch table gotoblas_<core> of a core.
 function check_kernel_cores() {
   local lib="${1}"
@@ -237,13 +251,16 @@ function check_kernel_cores() {
 }
 
 # Name the Fortran runtime next to libopenblas.a in the pkg-config and CMake
-# files of OpenBLAS, which name libopenblas.a alone. flang-rt locks its units
-# with pthread mutexes, which glibc 2.17 keeps in libpthread.
+# files of OpenBLAS, which name libopenblas.a alone. On Linux, flang-rt locks
+# its units with pthread mutexes, which glibc 2.17 keeps in libpthread.
 function link_fortran_runtime() {
   local install_dir="${1}"
   local pc="${install_dir}/lib/pkgconfig/openblas.pc"
   local cmake="${install_dir}/lib/cmake/openblas/OpenBLASConfig.cmake"
-  sed -i -e 's|^\(Libs: .*\)$|\1 -lflang_rt.runtime|' -e 's|^\(Libs.private: .*\)$|\1 -lpthread|' "${pc}"
+  sed -i -e 's|^\(Libs: .*\)$|\1 -lflang_rt.runtime|' "${pc}"
+  if [[ "${CROSS_TARGET}" == *-linux-* ]]; then
+    sed -i -e 's|^\(Libs.private: .*\)$|\1 -lpthread|' "${pc}"
+  fi
   if ! grep -q '^Libs: .* -lflang_rt.runtime$' "${pc}" || ! grep -q '^SET(OpenBLAS_LIBRARIES ' "${cmake}"; then
     printf 'ERROR: %s or %s has an unknown layout; update link_fortran_runtime for this OpenBLAS version.\n' "${pc}" "${cmake}" >&2
     return 1
@@ -297,7 +314,7 @@ function check_archive() {
   # .init_array, but lld (by design) does not, so a constructor such as
   # OpenBLAS's DYNAMIC_ARCH gotoblas_init silently never runs and the first
   # BLAS call dereferences a null dispatch table.
-  if [[ ! "${CROSS_TARGET}" =~ (apple|darwin) ]] && "${READELF}" -SW "${lib}" | grep -qE '\.(ctors|dtors)'; then
+  if [[ "${CROSS_TARGET}" == *-linux-* ]] && "${READELF}" -SW "${lib}" | grep -qE '\.(ctors|dtors)'; then
     printf 'ERROR: %s contains legacy .ctors/.dtors sections; constructors will not run under lld.\n' "${lib}" >&2
     return 1
   fi
@@ -314,6 +331,9 @@ function check_archive() {
       printf 'ERROR: %s has objects with MH_SUBSECTIONS_VIA_SYMBOLS and .L symbols; the linker splits their functions:\n%s\n' "${lib}" "${split_members}" >&2
       return 1
     fi
+    check_macos_version_min "${lib}" "${install_dir}/lib/libflang_rt.runtime.a" || return
+    check_bsd_symbol_table "${lib}" || return
+    check_bsd_symbol_table "${install_dir}/lib/libflang_rt.runtime.a" || return
   fi
 
   # Reject an archive without the kernels of a requested core. OpenBLAS can
@@ -376,17 +396,24 @@ function build_variant() {
   local excluded_cores=()
   local blas3_runs=()
   case "${CROSS_TARGET}" in
-  aarch64-apple* | aarch64-darwin*)
+  aarch64-apple-darwin)
+    # The default DYNAMIC_CORE list of OpenBLAS for macOS. The dispatch selects
+    # VORTEX, which uses the NEOVERSEN1 kernels, on every Apple CPU, and
+    # VORTEXM4 on CPUs with SME, which NO_SME leaves out with ARMV9SME.
     make_vars+=(TARGET=VORTEX)
+    cores=(ARMV8 NEOVERSEN1)
+    excluded_cores=(ARMV9SME VORTEXM4)
     ;;
-  aarch64*)
+  aarch64-*)
     check_excluded_cores "${ARM64_LINUX_DYNAMIC_LIST}" "${ARM64_LINUX_EXCLUDED_CORES}"
     make_vars+=(TARGET=ARMV8 "DYNAMIC_LIST=${ARM64_LINUX_DYNAMIC_LIST}")
     read -ra cores <<<"ARMV8 ${ARM64_LINUX_DYNAMIC_LIST}"
     read -ra excluded_cores <<<"${ARM64_LINUX_EXCLUDED_CORES}"
-    read -ra blas3_runs <<<"${ARM64_BLAS3_RUNS}"
+    if target_runs; then
+      read -ra blas3_runs <<<"${ARM64_BLAS3_RUNS}"
+    fi
     ;;
-  x86_64*)
+  x86_64-*)
     local dynamic_list
     dynamic_list="$("${BASH_SOURCE%/*}/get_x86_archs" <"${src_dir}/TargetList.txt")"
     make_vars+=(TARGET=HASWELL "DYNAMIC_LIST=${dynamic_list}")
@@ -404,8 +431,16 @@ function build_variant() {
   if [[ "${CROSS_TARGET}" == aarch64* ]]; then
     make_vars+=(NO_SME=1)
   fi
-  if [[ "${CROSS_TARGET}" =~ (mingw|windows) ]]; then
-    make_vars+=(CONSISTENT_FPCSR=1)
+  # On Windows, OpenBLAS links its test programs with the option
+  # -defaultlib:advapi32 of the MSVC linker, which the MinGW drivers of clang
+  # and flang reject. -ladvapi32 names the same library for them.
+  if [[ "${CROSS_TARGET}" == *-windows-* ]]; then
+    make_vars+=(CONSISTENT_FPCSR=1 EXTRALIB=-ladvapi32)
+  fi
+  # OpenBLAS reads the Xcode version with pkgutil, which only macOS has, to
+  # select options of the linker of Xcode. The build links with ld64.lld.
+  if [[ "${CROSS_TARGET}" == *-apple-darwin ]]; then
+    make_vars+=(XCVER=0)
   fi
 
   # The library targets only: the default target also links the test programs,
@@ -422,7 +457,14 @@ function build_variant() {
     check_kernel_cores_absent "${install_dir}/lib/libopenblas.a" "${excluded_cores[@]}"
   fi
 
-  ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" CROSS=0 "TARGET_RUNNER=${TARGET_RUNNER}" LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
+  # The test programs of a target whose programs cannot run on the build
+  # machine are linked without running them (CROSS=1).
+  local test_vars=(CROSS=0 "TARGET_RUNNER=${TARGET_RUNNER}")
+  if ! target_runs; then
+    printf 'Linking the OpenBLAS tests of %s without running them: %s\n' "${CROSS_TARGET}" "${TARGET_NO_RUN}"
+    test_vars=(CROSS=1)
+  fi
+  ${NICE} make -C "${src_dir}" -s tests "${make_vars[@]}" "${test_vars[@]}" LDFLAGS="${LDFLAGS} $(program_link_flags)" 2>&1 |
     log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
   if ((${#blas3_runs[@]} > 0)); then
     check_blas3_vector_lengths "${src_dir}/test" "${build_dir}/blas3" "${blas3_runs[@]}"
@@ -494,7 +536,7 @@ main() {
   : "${CC:?CC names the C compiler of the target}"
   : "${FC:?FC names the Fortran compiler of the target}"
   : "${HOSTCC:?HOSTCC names the C compiler of the build machine}"
-  : "${AR:?}" "${NM:?}" "${RANLIB:?}" "${READELF:?}"
+  : "${AR:?}" "${NM:?}" "${RANLIB:?}" "${READELF:?}" "${OBJDUMP:?}"
 
   local flang_rt
   flang_rt="$(${CC} -print-file-name=libflang_rt.runtime.a)"
