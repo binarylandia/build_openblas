@@ -1,0 +1,47 @@
+flang-rt: read the system clock without timespec_get on msvcrt
+
+SYSTEM_CLOCK reads the UTC time with timespec_get(&tspec, TIME_UTC), which
+mingw-w64 declares only for the UCRT. Without TIME_UTC on Windows, read it with
+GetSystemTimeAsFileTime, which every Windows version has
+(GetSystemTimePreciseAsFileTime needs Windows 8). With TIME_UTC, the source
+compiles unchanged.
+
+#line restores the line numbers of the unpatched source after the change, so
+the line numbers in runtime error messages, and with them the objects of every
+other target, stay the same.
+
+--- a/flang-rt/lib/runtime/time-intrinsic.cpp
++++ b/flang-rt/lib/runtime/time-intrinsic.cpp
+@@ -195,10 +195,23 @@
+ static count_t GetSystemClockCount(int kind, fallback_implementation) {
+   struct timespec tspec;
+ 
++#if defined(_WIN32) && !defined(TIME_UTC)
++  // msvcrt has no timespec_get. GetSystemTimeAsFileTime gives the UTC time in
++  // 100-nanosecond intervals since 1601-01-01 on every Windows version.
++  FILETIME fileTime;
++  GetSystemTimeAsFileTime(&fileTime);
++  const unsigned_count_t sinceUnixEpoch{
++      ((unsigned_count_t{fileTime.dwHighDateTime} << 32) |
++          fileTime.dwLowDateTime) -
++      116'444'736'000'000'000u};
++  tspec.tv_sec = sinceUnixEpoch / 10'000'000u;
++  tspec.tv_nsec = (sinceUnixEpoch % 10'000'000u) * 100u;
++#else
+   if (timespec_get(&tspec, TIME_UTC) < 0) {
+     // Return -HUGE(COUNT) to represent failure.
+     return -static_cast<count_t>(GetHUGE(kind));
+   }
++#endif
+ 
+   // Compute the timestamp as seconds plus nanoseconds in accordance
+   // with the requested kind at the call site.
+@@ -206,6 +219,8 @@
+ }
+ #endif // !_AIX
+ #endif // !NO_TIMESPEC
++// The line numbers of the unpatched source, which runtime error messages name.
++#line 209
+ 
+ template <typename Unused = void>
+ static count_t GetSystemClockCountRate(int kind, fallback_implementation) {

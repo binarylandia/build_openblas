@@ -36,6 +36,13 @@
 # headers, and SDKROOT and MACOSX_DEPLOYMENT_TARGET name the SDK and the oldest
 # macOS version.
 #
+# The patches of PATCHES_DIR/llvm-<version>/flang-rt/*.patch (default
+# /usr/local/share/build-llvm-runtimes/patches), where <version> is the version
+# of the source tarball, apply to the source in the order of their names, and
+# go into share/doc/flang-rt/patches/ next to the license of flang-rt. The
+# patches of one LLVM version do not apply to another one: a version without
+# such a directory builds the unchanged source.
+#
 # Examples:
 #   $0 /tmp/llvm-project-22.1.8.src.tar.xz aarch64-unknown-linux-gnu
 #   $0 /tmp/llvm-project-22.1.8.src.tar.xz arm64-apple-darwin20.2
@@ -45,6 +52,7 @@ set -euo pipefail
 trap "exit" INT
 
 LLVM_DIR="${LLVM_DIR:-/opt/llvm}"
+PATCHES_DIR="${PATCHES_DIR:-/usr/local/share/build-llvm-runtimes/patches}"
 
 # The parts of the LLVM source tree that the runtimes build reads.
 SOURCE_PARTS=(cmake runtimes llvm/cmake llvm/utils/llvm-lit third-party compiler-rt flang flang-rt)
@@ -62,6 +70,41 @@ function extract_source() {
   done
   mkdir -p "${src_dir}"
   tar -xJf "${tarball}" -C "${src_dir}" --strip-components=1 "${parts[@]}"
+}
+
+# Print the LLVM version of a source tarball: 22.1.8 for
+# llvm-project-22.1.8.src.tar.xz.
+function source_version() {
+  local name
+  name="$(basename "${1}")"
+  name="${name#llvm-project-}"
+  printf '%s\n' "${name%.src.tar.xz}"
+}
+
+# Apply the flang-rt patches of an LLVM version to the source, exactly (without
+# fuzz), and copy the applied patches into a directory.
+function apply_patches() {
+  local src_dir="${1}"
+  local version="${2}"
+  local applied_dir="${3}"
+  local patch_dir="${PATCHES_DIR}/llvm-${version}/flang-rt"
+  mkdir -p "${applied_dir}"
+  if [[ ! -d "${patch_dir}" ]]; then
+    printf 'No flang-rt patches for LLVM %s in %s\n' "${version}" "${PATCHES_DIR}"
+    return
+  fi
+  local list
+  list="$(find "${patch_dir}" -maxdepth 1 -name '*.patch' | LC_ALL=C sort)" || return
+  local patches=()
+  mapfile -t patches <<<"${list}"
+  local patch_file
+  for patch_file in "${patches[@]}"; do
+    [[ -n "${patch_file}" ]] || continue
+    printf 'Applying %s\n' "${patch_file}"
+    patch --directory="${src_dir}" --strip=1 --forward --batch --fuzz=0 \
+      --no-backup-if-mismatch --input="${patch_file}" || return
+    cp "${patch_file}" "${applied_dir}/"
+  done
 }
 
 # The intrinsic modules that the flang build generates with -fsyntax-only, in
@@ -245,10 +288,16 @@ main() {
   trap "rm -rf '${work_dir}'" EXIT
 
   extract_source "${tarball}" "${work_dir}/src"
+  apply_patches "${work_dir}/src" "$(source_version "${tarball}")" "${work_dir}/patches"
   build_intrinsic_modules "${work_dir}/src" "${triple}"
   configure "${work_dir}/src" "${work_dir}/build" "${triple}"
   build_and_install "${work_dir}/build" "${triple}"
   install -D -m 0644 "${work_dir}/src/flang-rt/LICENSE.TXT" "${LLVM_DIR}/share/doc/flang-rt/LICENSE.TXT"
+  local patch_file
+  for patch_file in "${work_dir}/patches"/*.patch; do
+    [[ -f "${patch_file}" ]] || continue
+    install -D -m 0644 "${patch_file}" "${LLVM_DIR}/share/doc/flang-rt/patches/${patch_file##*/}"
+  done
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

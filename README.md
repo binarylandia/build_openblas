@@ -24,12 +24,17 @@ Every native target builds with clang and flang of LLVM 22.1.8 ([binarylandia/bu
 | `x86_64-apple-darwin`, `aarch64-apple-darwin` | osxcross with the macOS 11.1 SDK and compiler-rt ([binarylandia/build_osxcross](https://github.com/binarylandia/build_osxcross)) | macOS 10.12 (x86_64), 11.0 (arm64) |
 | `x86_64-pc-windows-gnullvm`, `aarch64-pc-windows-gnullvm` | llvm-mingw of the LLVM release: mingw-w64 with the UCRT, compiler-rt | Windows 10; Windows 7 and 8 with the Universal C Runtime update (untested) |
 
-The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`).
+The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`), with the patches of `patches/llvm-<version>/flang-rt/`, which apply only to that LLVM version. The patches of LLVM 22.1.8 make flang-rt compile with the libstdc++ headers and the msvcrt headers of mingw-w64:
+
+- `0001-mingw-getpid.patch`: uses the `getpid` of `process.h`, which the libstdc++ headers include through `pthread.h` of winpthreads, in place of the `getpid` that flang-rt defines for Windows with another return type
+- `0002-msvcrt-system-clock.patch`: `SYSTEM_CLOCK` reads the UTC time with `GetSystemTimeAsFileTime` where the C runtime has no `timespec_get` with `TIME_UTC`, as msvcrt
+
+Each change applies only where the unpatched source does not compile (`_CRT_GETPID_DEFINED`, Windows without `TIME_UTC`), and `#line` keeps the line numbers of the unpatched source, which the runtime names in its error messages. Every target builds the patched source: built from the same directory, flang-rt for `x86_64-pc-windows-gnullvm`, `x86_64-unknown-linux-gnu`, and `x86_64-apple-darwin` is byte for byte the same archive with and without the patches.
 
 An archive holds:
 
 - `lib/libopenblas.a`: BLAS, CBLAS, LAPACK, and LAPACKE, with the kernels of every CPU of the architecture (`DYNAMIC_ARCH`)
-- `lib/libflang_rt.runtime.a`: the Fortran runtime of the flang that compiled LAPACK, static and position-independent, with its license in `share/doc/flang-rt/LICENSE.TXT`
+- `lib/libflang_rt.runtime.a`: the Fortran runtime of the flang that compiled LAPACK, static and position-independent, with its license in `share/doc/flang-rt/LICENSE.TXT` and the patches of its source in `share/doc/flang-rt/patches/`
 - headers, and pkg-config and CMake files that name both libraries
 
 A program links both archives and then needs only the C library of the target:
@@ -95,7 +100,7 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 - The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The distribution packages of the images (yum, apt) come from their mirrors and are not pinned
 - Archives list their files in sorted order with one owner and the commit time, so the same files give the same archive
 - `scripts/release` publishes only a build of a clean, pushed commit, and never changes a published release
-- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version and commit, source and sha256, compilers, LLVM release, target toolchain archive and sha256, flang-rt file and sha256, the files in the archive, build image file and sha256, and build commit
+- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version and commit, source and sha256, compilers, LLVM release, target toolchain archive and sha256, flang-rt file, sha256, and patches, the files in the archive, build image file and sha256, and build commit
 
 ## Features
 

@@ -20,8 +20,9 @@
 # program of the target on the build machine (empty when it runs directly), and
 # TARGET_NO_RUN, the reason why programs of the target cannot run on the build
 # machine (empty when they can). Each archive holds libopenblas.a and the
-# Fortran runtime libflang_rt.runtime.a of the flang that compiled LAPACK, so a
-# program that links both needs no other runtime than the C library of the
+# Fortran runtime libflang_rt.runtime.a of the flang that compiled LAPACK, with
+# the license of flang-rt and the patches that the build applied to its source,
+# so a program that links both needs no other runtime than the C library of the
 # target.
 #
 # Examples:
@@ -455,6 +456,11 @@ function build_variant() {
 
   install -m 0644 "${flang_rt}" "${install_dir}/lib/libflang_rt.runtime.a"
   install -D -m 0644 "${LLVM_DIR:?}/share/doc/flang-rt/LICENSE.TXT" "${install_dir}/share/doc/flang-rt/LICENSE.TXT"
+  local patch_file
+  for patch_file in "${LLVM_DIR}/share/doc/flang-rt/patches/"*.patch; do
+    [[ -f "${patch_file}" ]] || continue
+    install -D -m 0644 "${patch_file}" "${install_dir}/share/doc/flang-rt/patches/${patch_file##*/}"
+  done
   link_fortran_runtime "${install_dir}"
 
   check_archive "${install_dir}" "${build_dir}/check" ${cores[@]+"${cores[@]}"}
@@ -487,6 +493,8 @@ function variant_metadata() {
   local install_dir="${2}"
   local contents
   contents="$(find "${install_dir}" -type f -printf '%P\n' | LC_ALL=C sort | jq -R . | jq -s .)"
+  local patches
+  patches="$(jq '[.[] | select(startswith("share/doc/flang-rt/patches/"))]' <<<"${contents}")"
   jq -n \
     --arg variant "${variant}" \
     --arg openblas "${OPENBLAS_VERSION}" \
@@ -501,6 +509,7 @@ function variant_metadata() {
     --arg target_toolchain "${TARGET_TOOLCHAIN_URL:?}" \
     --arg target_toolchain_sha256 "${TARGET_TOOLCHAIN_SHA256:?}" \
     --arg flang_rt_sha256 "$(sha256sum "${install_dir}/lib/libflang_rt.runtime.a" | cut -d' ' -f1)" \
+    --argjson patches "${patches}" \
     --argjson contents "${contents}" \
     '{
       kind: "native",
@@ -521,6 +530,7 @@ function variant_metadata() {
         sha256: $flang_rt_sha256,
         source: $llvm_source,
         source_sha256: $llvm_source_sha256,
+        patches: $patches,
         build_script: "docker/files/build-llvm-runtimes"
       },
       contents: $contents

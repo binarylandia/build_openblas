@@ -23,6 +23,7 @@ RUN set -euxo pipefail >/dev/null \
   jq \
   make \
   parallel \
+  patch \
   sudo \
   tar \
   xz \
@@ -82,6 +83,7 @@ RUN set -euxo pipefail >/dev/null \
 # bin directory of LLVM, which selects the sysroot and the GCC runtime (crt
 # files, libgcc, libstdc++ headers) of the crosstool-NG toolchain, and lld.
 COPY docker/files/build-llvm-runtimes /usr/local/bin/build-llvm-runtimes
+COPY patches /usr/local/share/build-llvm-runtimes/patches
 RUN set -euxo pipefail >/dev/null \
 && printf -- '%s\n' \
   "--sysroot=${GCC_DIR}/${TRIPLET}/sysroot" \

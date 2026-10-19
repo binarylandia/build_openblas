@@ -23,6 +23,7 @@ RUN set -euxo pipefail >/dev/null \
   jq \
   make \
   parallel \
+  patch \
   sudo \
   tar \
   xz \
@@ -83,6 +84,7 @@ RUN set -euxo pipefail >/dev/null \
 # compiler-rt, and lld, instead of the configuration of clang, whose C++
 # runtime options (-stdlib, -unwindlib) flang rejects.
 COPY docker/files/build-llvm-runtimes /usr/local/bin/build-llvm-runtimes
+COPY patches /usr/local/share/build-llvm-runtimes/patches
 RUN set -euxo pipefail >/dev/null \
 && printf -- '%s\n' \
   "--sysroot=<CFGDIR>/../${TRIPLET}" \

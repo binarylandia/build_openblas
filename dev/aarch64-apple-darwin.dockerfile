@@ -23,6 +23,7 @@ RUN set -euxo pipefail >/dev/null \
   jq \
   make \
   parallel \
+  patch \
   sudo \
   tar \
   xz \
@@ -87,6 +88,7 @@ RUN set -euxo pipefail >/dev/null \
 # directory of LLVM, which names the SDK, the deployment target, and ld64.lld,
 # the flags that the osxcross wrappers add for clang.
 COPY docker/files/build-llvm-runtimes /usr/local/bin/build-llvm-runtimes
+COPY patches /usr/local/share/build-llvm-runtimes/patches
 RUN set -euxo pipefail >/dev/null \
 && printf -- '%s\n' \
   "-isysroot ${SDKROOT}" \
