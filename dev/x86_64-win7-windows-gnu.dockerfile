@@ -1,0 +1,174 @@
+FROM quay.io/pypa/manylinux2014_x86_64:2024.10.19-1@sha256:2d03fb51340fbbc5732c7251eedc2ac015c96a16ed91f818ea500e5b2099da96
+
+SHELL ["bash", "-euxo", "pipefail", "-c"]
+
+COPY docker/files/fetch /usr/local/bin/fetch
+
+RUN set -euxo pipefail >/dev/null \
+&& sed -i "s/enabled=1/enabled=0/g" "/etc/yum/pluginconf.d/fastestmirror.conf" \
+&& sed -i "s/enabled=1/enabled=0/g" "/etc/yum/pluginconf.d/ovl.conf" \
+&& yum clean all >/dev/null \
+&& yum install -y epel-release >/dev/null \
+&& yum remove -y \
+  clang* \
+  devtoolset* \
+  gcc* \
+  llvm-toolset* \
+>/dev/null \
+&& yum install -y \
+  bash \
+  ca-certificates \
+  curl \
+  git \
+  jq \
+  make \
+  parallel \
+  patch \
+  sudo \
+  tar \
+  xz \
+  zstd \
+>/dev/null \
+&& yum clean all >/dev/null \
+&& rm -rf /var/cache/yum
+
+ENV CCACHE_DIR="/cache/ccache"
+ENV CCACHE_NOCOMPRESS="1"
+ENV CCACHE_MAXSIZE="50G"
+RUN set -euxo pipefail >/dev/null \
+&& fetch "https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz" "80cab87bd510eca796467aee8e663c398239e0df1c4800a0b5dff11dca0b4f18" /tmp/download \
+&& tar --strip-components=1 -C "/usr/bin" -xJf /tmp/download "ccache-4.10.2-linux-x86_64/ccache" \
+&& rm /tmp/download \
+&& which ccache \
+&& ccache --version
+
+RUN set -euxo pipefail >/dev/null \
+&& fetch "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" "7695cb4c68fa2e703bca4d0e5ea7bce3f6fc8ac2db507279d02818e3bd704bcc" /tmp/download \
+&& tar -C "/usr" -xJf /tmp/download \
+&& rm /tmp/download \
+&& ls /usr/bin/gcc \
+&& gcc -v \
+&& ls /usr/bin/gcc-ar \
+&& gcc-ar --version
+
+# clang, flang, lld, and the LLVM binary tools. The Fortran runtime of the
+# target is built below from the LLVM source of this release.
+ENV LLVM_RELEASE="llvm-22.1.8-2026-10-18_10-26-24"
+ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"
+ENV LLVM_SOURCE_SHA256="922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888"
+ENV LLVM_DIR="/opt/llvm"
+RUN set -euxo pipefail >/dev/null \
+&& mkdir -p "${LLVM_DIR}" \
+&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "c80ac102a9b833ccc3de6e838fba592f76334bda8b57b6629f853d8d2a84bae8" /tmp/download \
+&& zstd -dc /tmp/download | tar -C "${LLVM_DIR}" -x \
+&& rm /tmp/download \
+&& "${LLVM_DIR}/bin/clang" --version \
+&& "${LLVM_DIR}/bin/flang" --version
+
+# Wine runs the check programs and the OpenBLAS tests of the target, in the
+# prefix ~/.wine, which it creates on the first run.
+RUN set -euxo pipefail >/dev/null \
+&& yum install -y wine-core >/dev/null \
+&& yum clean all >/dev/null \
+&& rm -rf /var/cache/yum \
+&& wine64 --version
+
+# The MinGW GCC cross toolchain of crosstool-NG, for the C runtime msvcrt.dll
+# that every Windows has: the sysroot of mingw-w64 (headers, crt files, import
+# libraries), libgcc, and the libstdc++ headers, which compile flang-rt, and
+# the GCC driver and GNU ld, which link programs as the Rust target
+# x86_64-win7-windows-gnu does. Its bin directory is on PATH, where clang and
+# flang find GNU ld.
+ENV TRIPLET="x86_64-w64-mingw32"
+ENV GCC_VERSION="16.2.0"
+ENV GCC_DIR="/opt/gcc"
+ENV PATH="${GCC_DIR}/bin:${PATH}"
+ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_crosstool-ng/releases/download/gcc-15.3.0_16.2.0-2026-10-18_08-33-54/gcc-16.2.0-x86_64-w64-mingw32-2026-10-18_08-33-54.tar.xz"
+ENV TARGET_TOOLCHAIN_SHA256="b63fe486efab10ffdb2f82bf13b3d77631e18316c5a20816d7e41c3e40836864"
+RUN set -euxo pipefail >/dev/null \
+&& mkdir -p "${GCC_DIR}" \
+&& fetch "${TARGET_TOOLCHAIN_URL}" "${TARGET_TOOLCHAIN_SHA256}" /tmp/download \
+&& tar -C "${GCC_DIR}" -xJf /tmp/download \
+&& rm /tmp/download \
+&& "${GCC_DIR}/bin/${TRIPLET}-gcc" -v
+
+# clang and flang for the target: --target=<triple> loads
+# <normalized triple>.cfg (clang, clang++) or <normalized triple>-flang.cfg
+# (flang) from the bin directory of LLVM, for example
+# x86_64-w64-windows-gnu.cfg. They name the sysroot of the GCC toolchain,
+# Windows 7 as the oldest Windows version (_WIN32_WINNT, so that the headers
+# declare no API of a newer Windows), and GNU ld. clang++ links libgcc
+# statically, as the C and Fortran drivers do by default; flang rejects the
+# option. The MinGW driver of clang ignores --gcc-install-dir and looks for
+# GCC in <sysroot>/lib/gcc and the libstdc++ headers in <sysroot>/include/c++,
+# so both link there to the directories of the toolchain.
+COPY docker/files/build-llvm-runtimes /usr/local/bin/build-llvm-runtimes
+COPY patches /usr/local/share/build-llvm-runtimes/patches
+RUN set -euxo pipefail >/dev/null \
+&& sysroot="${GCC_DIR}/${TRIPLET}/sysroot" \
+&& ln -s "../../../lib/gcc" "${sysroot}/lib/gcc" \
+&& ln -s "../../include/c++" "${sysroot}/include/c++" \
+&& normalized="$("${LLVM_DIR}/bin/clang" --target="${TRIPLET}" -print-target-triple)" \
+&& printf -- '%s\n' \
+  "--sysroot=${sysroot}" \
+  "-D_WIN32_WINNT=0x0601" \
+  "-fuse-ld=bfd" \
+  "-static-libgcc" \
+  >"${LLVM_DIR}/bin/${normalized}.cfg" \
+&& printf -- '%s\n' \
+  "--sysroot=${sysroot}" \
+  "-D_WIN32_WINNT=0x0601" \
+  "-fuse-ld=bfd" \
+  >"${LLVM_DIR}/bin/${normalized}-flang.cfg" \
+&& test "$("${LLVM_DIR}/bin/clang" --target="${TRIPLET}" -print-libgcc-file-name)" -ef "${GCC_DIR}/lib/gcc/${TRIPLET}/${GCC_VERSION}/libgcc.a" \
+&& fetch "${LLVM_SOURCE}" "${LLVM_SOURCE_SHA256}" "/tmp/${LLVM_SOURCE##*/}" \
+&& build-llvm-runtimes "/tmp/${LLVM_SOURCE##*/}" "${TRIPLET}" \
+&& rm "/tmp/${LLVM_SOURCE##*/}" \
+&& ls "${LLVM_DIR}/lib/clang/22/lib/${normalized}/libflang_rt.runtime.a" "${LLVM_DIR}/share/doc/flang-rt/patches/"
+
+ENV HOSTCC="${LLVM_DIR}/bin/clang --no-default-config"
+ENV CC="${LLVM_DIR}/bin/clang --target=${TRIPLET}"
+ENV CXX="${LLVM_DIR}/bin/clang++ --target=${TRIPLET}"
+ENV FC="${LLVM_DIR}/bin/flang --target=${TRIPLET}"
+ENV CONSUMER_CC="${GCC_DIR}/bin/${TRIPLET}-gcc"
+ENV AR="${LLVM_DIR}/bin/llvm-ar"
+ENV LD="${GCC_DIR}/bin/${TRIPLET}-ld"
+ENV NM="${LLVM_DIR}/bin/llvm-nm"
+ENV OBJCOPY="${LLVM_DIR}/bin/llvm-objcopy"
+ENV OBJDUMP="${LLVM_DIR}/bin/llvm-objdump"
+ENV RANLIB="${LLVM_DIR}/bin/llvm-ranlib"
+ENV READELF="${LLVM_DIR}/bin/llvm-readelf"
+ENV READOBJ="${LLVM_DIR}/bin/llvm-readobj"
+ENV SIZE="${LLVM_DIR}/bin/llvm-size"
+ENV STRINGS="${LLVM_DIR}/bin/llvm-strings"
+ENV STRIP="${LLVM_DIR}/bin/llvm-strip"
+ENV WINEDEBUG="-all"
+ENV WINEDLLOVERRIDES="mscoree=;mshtml="
+ENV TARGET_RUNNER="wine64"
+
+
+ARG USER=user
+ARG GROUP=user
+ARG UID
+ARG GID
+
+ENV USER=$USER
+ENV GROUP=$GROUP
+ENV UID=$UID
+ENV GID=$GID
+ENV TERM="xterm-256color"
+ENV HOME="/home/${USER}"
+
+COPY docker/files /
+
+RUN set -euxo pipefail >/dev/null \
+&& /create-user \
+&& sed -i /etc/sudoers -re 's/^%sudo.*/%sudo ALL=(ALL:ALL) NOPASSWD: ALL/g' \
+&& sed -i /etc/sudoers -re 's/^root.*/root ALL=(ALL:ALL) NOPASSWD: ALL/g' \
+&& sed -i /etc/sudoers -re 's/^#includedir.*/## **Removed the include directive** ##"/g' \
+&& echo "%sudo ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+&& echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+&& touch ${HOME}/.hushlogin \
+&& chown -R ${UID}:${GID} "${HOME}"
+
+USER ${USER}

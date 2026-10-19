@@ -2,11 +2,43 @@
 #
 # Checks of the native archives, which scripts/main runs on every build. They
 # read the tools and the target from the environment of the build image: CC, NM,
-# READELF, OBJDUMP, READOBJ, TARGET_RUNNER, TARGET_NO_RUN, and CROSS_TARGET.
+# READELF, OBJDUMP, READOBJ, TARGET_RUNNER, TARGET_NO_RUN, CROSS_TARGET, and
+# CONSUMER_CC, the C compiler that links the consumer check program as consumers
+# of the archives do (default CC).
 #
 
 # The program that calls the LAPACK and BLAS routines that consumers call.
 CONSUMER_CHECK_SOURCE="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/consumer-check.c"
+
+# The DLLs that programs of x86_64-win7-windows-gnu may import: the C runtime
+# msvcrt.dll and the system DLLs that the MinGW GCC driver links by default,
+# which every Windows since Windows 7 has.
+WINDOWS7_SYSTEM_DLLS=(advapi32.dll kernel32.dll msvcrt.dll shell32.dll user32.dll)
+
+# The exports that msvcrt.dll gained in Windows 8 and 8.1 on x86_64: the
+# sections "added in Windows 8" and "added in Windows 8.1 OS system version of
+# msvcrt.dll" of mingw-w64-crt/lib-common/msvcrt.def.in of mingw-w64 v14.0.0,
+# without the i386 and ARM entries. The C runtime headers declare them for every
+# Windows version, so the header comparison of write_windows8_functions does
+# not find them. The list after them names no export of any msvcrt.dll.
+WINDOWS8_MSVCRT_EXPORTS=(
+  _wcstod_l
+  __AdjustPointer
+  __ExceptionPtrAssign
+  __ExceptionPtrCompare
+  __ExceptionPtrCopy
+  __ExceptionPtrCopyException
+  __ExceptionPtrCreate
+  __ExceptionPtrCurrentException
+  __ExceptionPtrDestroy
+  __ExceptionPtrRethrow
+  __ExceptionPtrSwap
+  __ExceptionPtrToBool
+  _W_Getdays
+  _W_Getmonths
+  _W_Gettnames
+  _Wcsftime
+)
 
 # Print the prefix that the target puts in front of C symbol names: _ on Mach-O,
 # nothing on ELF.
@@ -98,11 +130,13 @@ function target_runs() {
 
 # Print the link flags of the programs of the target: musl programs link
 # statically, as their consumers do, and run on the build machine without the
-# musl loader; glibc programs link the C library dynamically. On macOS and
-# Windows, programs link the C runtime as their consumers do by default.
+# musl loader; glibc programs link the C library dynamically. Windows 7
+# programs link libgcc and winpthreads statically, so that they load only system
+# DLLs. On macOS and the other Windows targets, programs link the C runtime as
+# their consumers do by default.
 function program_link_flags() {
   case "${CROSS_TARGET}" in
-  *-linux-musl) printf -- '-static\n' ;;
+  *-linux-musl | *-win7-windows-gnu) printf -- '-static\n' ;;
   esac
 }
 
@@ -168,13 +202,18 @@ function check_macos_version_min() {
 # Fail when a program needs a shared library or a symbol version beyond what
 # the oldest supported system of the target provides: glibc 2.17 and its
 # libraries on glibc targets, nothing on musl targets, libSystem on macOS (with
-# the minimum macOS version MACOSX_DEPLOYMENT_TARGET), and the system DLLs and
-# the UCRT on Windows.
+# the minimum macOS version MACOSX_DEPLOYMENT_TARGET), the system DLLs and
+# msvcrt.dll of Windows 7 on x86_64-win7-windows-gnu, and the system DLLs and
+# the UCRT on the other Windows targets.
 function check_system_dependencies() {
   local program="${1}"
   case "${CROSS_TARGET}" in
   *-apple-darwin)
     check_macos_dependencies "${program}"
+    return
+    ;;
+  *-win7-windows-gnu)
+    check_windows7_dependencies "${program}"
     return
     ;;
   *-windows-*)
@@ -258,6 +297,162 @@ function check_windows_dependencies() {
   printf 'System dependencies of %s: %s\n' "${program##*/}" "$(paste -sd ' ' - <<<"${dlls}")"
 }
 
+# Fail unless a Windows program imports only the DLLs of WINDOWS7_SYSTEM_DLLS,
+# none of the UCRT (ucrtbase.dll, api-ms-win-*), and none of the functions of
+# Windows 8 or later that the file WINDOWS8_FUNCTIONS lists
+# (write_windows8_functions).
+function check_windows7_dependencies() {
+  local program="${1}"
+  local denied_list="${WINDOWS8_FUNCTIONS:?WINDOWS8_FUNCTIONS names the list of the functions of Windows 8 or later}"
+  local imports
+  imports="$("${READOBJ:?}" --coff-imports "${program}")" || return
+  # Lines of <dll> <function>, with the DLL names in lower case.
+  local imported
+  imported="$(awk '$1 == "Name:" {dll = tolower($2)} $1 == "Symbol:" {print dll, $2}' <<<"${imports}")"
+  local dlls
+  dlls="$(awk '$1 == "Name:" {print $2}' <<<"${imports}" | sort -fu)"
+  if [[ -z "${dlls}" ]]; then
+    printf 'ERROR: %s imports no DLL\n' "${program}" >&2
+    return 1
+  fi
+  local ucrt
+  ucrt="$(grep -iE '^(ucrtbase\.dll|api-ms-win-.*)$' <<<"${dlls}" || true)"
+  if [[ -n "${ucrt}" ]]; then
+    printf 'ERROR: %s imports the UCRT, which Windows 7 lacks without an update: %s\n' "${program}" "$(paste -sd ' ' - <<<"${ucrt}")" >&2
+    return 1
+  fi
+  local extra
+  extra="$(LC_ALL=C comm -23 <(tr '[:upper:]' '[:lower:]' <<<"${dlls}" | LC_ALL=C sort -u) <(printf '%s\n' "${WINDOWS7_SYSTEM_DLLS[@]}" | LC_ALL=C sort -u))"
+  if [[ -n "${extra}" ]]; then
+    printf 'ERROR: %s imports DLLs beyond %s: %s\n' "${program}" "${WINDOWS7_SYSTEM_DLLS[*]}" "$(paste -sd ' ' - <<<"${extra}")" >&2
+    return 1
+  fi
+  local functions
+  functions="$(cut -d' ' -f2 <<<"${imported}" | LC_ALL=C sort -u)"
+  local denied
+  denied="$(LC_ALL=C comm -12 <(printf '%s\n' "${functions}") "${denied_list}")"
+  if [[ -n "${denied}" ]]; then
+    printf 'ERROR: %s imports functions of Windows 8 or later:\n%s\n' "${program}" "$(grep -wFf <(printf '%s\n' "${denied}") <<<"${imported}")" >&2
+    return 1
+  fi
+  printf 'System dependencies of %s: %s, with none of %s functions of Windows 8 or later among its %s imported functions\n' \
+    "${program##*/}" "$(paste -sd ' ' - <<<"${dlls}")" "$(wc -l <"${denied_list}")" "$(wc -l <<<"${functions}")"
+}
+
+# Print the include directory of the mingw-w64 headers of CC: the directory of
+# the windows.h that the preprocessor includes.
+function windows_include_dir() {
+  local deps
+  deps="$(printf '#include <windows.h>\n' | ${CC} -x c -M -MT deps -)" || return
+  local headers
+  headers="$(sed -e 's/\\$//' -e 's/[[:space:]]\{1,\}/\n/g' <<<"${deps}" | grep '/windows\.h$')" || {
+    printf 'ERROR: %s does not include a windows.h\n' "${CC}" >&2
+    return 1
+  }
+  dirname "$(realpath "${headers%%$'\n'*}")"
+}
+
+# Print the names of the functions that an AST dump of clang declares, without
+# the implicit declarations of builtins.
+function ast_function_names() {
+  awk -v q="'" '/FunctionDecl 0x/ && !/ implicit / {
+    for (k = 1; k < NF && $k !~ /FunctionDecl$/; k++) {}
+    for (i = k + 2; i <= NF; i++) if (substr($i, 1, 1) == q) { print $(i - 1); break }
+  }'
+}
+
+# Write the names of the functions that one mingw-w64 header declares on its
+# own, after the windows.h of the precompiled header, in each configuration of
+# write_windows8_functions, into <work dir>/<configuration>/<header>.names.
+# Leave a header that does not compile as C in either configuration out, and
+# name it in <work dir>/skipped/.
+function windows_header_functions() {
+  local work_dir="${1}"
+  local header="${2}"
+  local config
+  local defines=()
+  local ast
+  for config in windows7 newest; do
+    read -ra defines <"${work_dir}/${config}.defines"
+    # shellcheck disable=SC2086 # CC is a command with arguments
+    if ! ast="$(printf '#include <%s>\n' "${header}" |
+      ${CC} "${defines[@]}" -include-pch "${work_dir}/${config}.pch" -x c -fsyntax-only \
+        -fno-color-diagnostics -Xclang -ast-dump - 2>/dev/null)"; then
+      rm -f "${work_dir}/windows7/${header}.names" "${work_dir}/newest/${header}.names"
+      : >"${work_dir}/skipped/${header}"
+      return 0
+    fi
+    ast_function_names <<<"${ast}" >"${work_dir}/${config}/${header}.names"
+  done
+}
+export -f windows_header_functions ast_function_names
+
+# Write the names of the functions of Windows 8 or later into a file, one per
+# line, sorted: the functions that the mingw-w64 headers of CC declare with
+# _WIN32_WINNT=0x0A00 and the newest NTDDI_VERSION of sdkddkver.h, and not with
+# _WIN32_WINNT=0x0601 and NTDDI_VERSION=0x06010000 (Windows 7), and the
+# exports of WINDOWS8_MSVCRT_EXPORTS. The headers declare these functions under
+# _WIN32_WINNT >= 0x0602 or NTDDI_VERSION >= NTDDI_WIN8 and later values. Each
+# header of the include directory compiles on its own after windows.h, which a
+# precompiled header holds; headers that do not compile as C on their own are
+# left out. The list lacks the functions of Windows 8 or later that the headers
+# declare without such a guard, for example GetSystemTimePreciseAsFileTime,
+# WaitOnAddress, and WakeByAddressSingle in mingw-w64 v14.0.0.
+function write_windows8_functions() {
+  local output="${1}"
+  local work_dir="${2}"
+  local include_dir
+  include_dir="$(windows_include_dir)" || return
+  local macros
+  macros="$(printf '#include <sdkddkver.h>\n' | ${CC} -E -dM -x c -)" || return
+  local versions
+  versions="$(awk '$2 ~ /^NTDDI_WIN[0-9A-Z_]+$/ && $3 ~ /^0x[0-9A-Fa-f]+$/ {print $3}' <<<"${macros}")"
+  local newest=0
+  local value
+  while read -r value; do
+    if ((value > newest)); then
+      newest="${value}"
+    fi
+  done <<<"${versions}"
+  if ((newest <= 0x06010000)); then
+    printf 'ERROR: %s/sdkddkver.h defines no NTDDI version after Windows 7\n' "${include_dir}" >&2
+    return 1
+  fi
+
+  rm -rf "${work_dir}"
+  mkdir -p "${work_dir}/windows7" "${work_dir}/newest" "${work_dir}/skipped"
+  printf -- '-U_WIN32_WINNT -D_WIN32_WINNT=0x0601 -DNTDDI_VERSION=0x06010000\n' >"${work_dir}/windows7.defines"
+  printf -- '-U_WIN32_WINNT -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x%08X\n' "${newest}" >"${work_dir}/newest.defines"
+  printf '#include <windows.h>\n' >"${work_dir}/pch-windows.h"
+  local config
+  local defines=()
+  local ast
+  for config in windows7 newest; do
+    read -ra defines <"${work_dir}/${config}.defines"
+    # shellcheck disable=SC2086 # CC is a command with arguments
+    ${CC} "${defines[@]}" -x c-header "${work_dir}/pch-windows.h" -o "${work_dir}/${config}.pch" || return
+    # shellcheck disable=SC2086 # CC is a command with arguments
+    ast="$(${CC} "${defines[@]}" -x c -fsyntax-only -fno-color-diagnostics -Xclang -ast-dump "${work_dir}/pch-windows.h")" || return
+    ast_function_names <<<"${ast}" >"${work_dir}/${config}/windows.h.names"
+  done
+
+  find "${include_dir}" -maxdepth 1 -type f -name '*.h' ! -name 'windows.h' -printf '%f\n' | LC_ALL=C sort >"${work_dir}/headers"
+  parallel --will-cite --halt now,fail=1 --jobs="$(nproc)" windows_header_functions "${work_dir}" {} <"${work_dir}/headers" || return
+
+  {
+    LC_ALL=C comm -13 \
+      <(cat "${work_dir}/windows7/"*.names | LC_ALL=C sort -u) \
+      <(cat "${work_dir}/newest/"*.names | LC_ALL=C sort -u)
+    printf '%s\n' "${WINDOWS8_MSVCRT_EXPORTS[@]}"
+  } | LC_ALL=C sort -u >"${output}"
+  local headers
+  local skipped
+  headers="$(wc -l <"${work_dir}/headers")"
+  skipped="$(find "${work_dir}/skipped" -type f | wc -l)"
+  printf 'Functions of Windows 8 or later: %s, from %s of the %s headers in %s (NTDDI_VERSION 0x%08X against 0x06010000; %s headers do not compile as C on their own) and %s msvcrt.dll exports\n' \
+    "$(wc -l <"${output}")" "$((headers - skipped + 1))" "$((headers + 1))" "${include_dir}" "${newest}" "${skipped}" "${#WINDOWS8_MSVCRT_EXPORTS[@]}"
+}
+
 # Run the consumer check program, with the core given by OPENBLAS_CORETYPE when
 # a core is given, print its output, and print the name of the OpenBLAS core in
 # use to the file descriptor 3.
@@ -281,13 +476,14 @@ function run_consumer_check() {
 }
 
 # Link the consumer check program against the installed archives as a consumer
-# does, check its system dependencies, and run it when programs of the target
-# run on the build machine: with the core that OpenBLAS detects, and, when the
-# program runs in qemu with the max CPU model, which implements every
-# instruction set of the target, with each of the given kernel cores, forced
-# through OPENBLAS_CORETYPE. A forced core that leaves the detected one in use
-# was not applied. Its reported name may differ from the forced one, because
-# OpenBLAS reports the first core that shares the kernel table.
+# does, with CONSUMER_CC, check its system dependencies, and run it when
+# programs of the target run on the build machine: with the core that OpenBLAS
+# detects, and, when the program runs in qemu with the max CPU model, which
+# implements every instruction set of the target, with each of the given
+# kernel cores, forced through OPENBLAS_CORETYPE. A forced core that leaves the
+# detected one in use was not applied. Its reported name may differ from the
+# forced one, because OpenBLAS reports the first core that shares the kernel
+# table.
 function check_consumer() {
   local install_dir="${1}"
   local work_dir="${2}"
@@ -301,8 +497,9 @@ function check_consumer() {
   local flang_rt="${install_dir}/lib/libflang_rt.runtime.a"
   local link_flags
   link_flags="$(program_libs) $(program_link_flags)"
-  # shellcheck disable=SC2086 # the link flags are words
-  ${CC} -O2 -o "${program}" "${CONSUMER_CHECK_SOURCE}" "${lib}" "${flang_rt}" ${link_flags} || return
+  local consumer_cc="${CONSUMER_CC:-${CC}}"
+  # shellcheck disable=SC2086 # the compiler and the link flags are words
+  ${consumer_cc} -O2 -o "${program}" "${CONSUMER_CHECK_SOURCE}" "${lib}" "${flang_rt}" ${link_flags} || return
   check_system_dependencies "${program}" || return
 
   # The program again with every object of libopenblas.a, so that every
@@ -313,8 +510,8 @@ function check_consumer() {
   if [[ "${CROSS_TARGET}" == *-apple-darwin ]]; then
     whole_archive=("-Wl,-force_load,${lib}")
   fi
-  # shellcheck disable=SC2086 # the link flags are words
-  ${CC} -O2 -o "${program_all}" "${CONSUMER_CHECK_SOURCE}" "${whole_archive[@]}" "${flang_rt}" ${link_flags} || return
+  # shellcheck disable=SC2086 # the compiler and the link flags are words
+  ${consumer_cc} -O2 -o "${program_all}" "${CONSUMER_CHECK_SOURCE}" "${whole_archive[@]}" "${flang_rt}" ${link_flags} || return
   check_system_dependencies "${program_all}" || return
 
   if ! target_runs; then

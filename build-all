@@ -24,6 +24,7 @@ DEFAULT_TARGETS=(
   "x86_64-pc-windows-gnullvm"
   "x86_64-unknown-linux-gnu"
   "x86_64-unknown-linux-musl"
+  "x86_64-win7-windows-gnu"
 )
 
 function run_one() {

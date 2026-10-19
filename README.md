@@ -23,6 +23,7 @@ Every native target builds with clang and flang of LLVM 22.1.8 ([binarylandia/bu
 | `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` | crosstool-NG GCC 16.2.0: musl 1.2.6, crt files, libgcc | none (static) |
 | `x86_64-apple-darwin`, `aarch64-apple-darwin` | osxcross with the macOS 11.1 SDK and compiler-rt ([binarylandia/build_osxcross](https://github.com/binarylandia/build_osxcross)) | macOS 10.12 (x86_64), 11.0 (arm64) |
 | `x86_64-pc-windows-gnullvm`, `aarch64-pc-windows-gnullvm` | llvm-mingw of the LLVM release: mingw-w64 with the UCRT, compiler-rt | Windows 10; Windows 7 and 8 with the Universal C Runtime update (untested) |
+| `x86_64-win7-windows-gnu` | crosstool-NG MinGW GCC 16.2.0: mingw-w64 v14.0.0 with msvcrt, crt files, libgcc, winpthreads | Windows 7 |
 
 The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`), with the patches of `patches/llvm-<version>/flang-rt/`, which apply only to that LLVM version. The patches of LLVM 22.1.8 make flang-rt compile with the libstdc++ headers and the msvcrt headers of mingw-w64:
 
@@ -41,7 +42,8 @@ A program links both archives and then needs only the C library of the target:
 
 - Linux: `cc main.c libopenblas.a libflang_rt.runtime.a -lm -lpthread` needs glibc 2.17 on gnu targets, and nothing on musl targets when it links statically
 - macOS: `cc main.c libopenblas.a libflang_rt.runtime.a` loads only `/usr/lib/libSystem.B.dylib`
-- Windows: `x86_64-w64-mingw32-clang main.c libopenblas.a libflang_rt.runtime.a` imports only `KERNEL32.dll` and the UCRT (`api-ms-win-crt-*.dll`). The archives use the UCRT, so they do not link with toolchains for msvcrt, such as the MinGW GCC of the Rust target `x86_64-pc-windows-gnu`
+- Windows (`*-pc-windows-gnullvm`): `x86_64-w64-mingw32-clang main.c libopenblas.a libflang_rt.runtime.a` imports only `KERNEL32.dll` and the UCRT (`api-ms-win-crt-*.dll`). The archives use the UCRT, so they do not link with toolchains for msvcrt
+- Windows 7 (`x86_64-win7-windows-gnu`): `x86_64-w64-mingw32-gcc -static main.c libopenblas.a libflang_rt.runtime.a` imports only `KERNEL32.dll` and `msvcrt.dll`, and no function of Windows 8 or later. The archives use msvcrt and link with the MinGW GCC toolchains for msvcrt, such as the one of the Rust target `x86_64-win7-windows-gnu`. `-static` links libgcc and winpthreads, whose `clock_gettime` the `RANDOM_INIT` of flang-rt calls, into the program
 
 The archives need no C++ runtime and no unwinder. They call the compiler support routines of libgcc or compiler-rt (128-bit integer and floating-point arithmetic, complex multiplication and division, aarch64 atomics), which C compilers link by default.
 
@@ -51,6 +53,7 @@ Every build checks each archive:
 - `libopenblas.a` calls no gfortran runtime, `libflang_rt.runtime.a` defines every Fortran runtime function that it calls, and neither archive needs a C++ runtime
 - on macOS, no object needs a newer macOS than the deployment target, and both archives have the BSD symbol table that the linker of Xcode needs
 - a C program (`scripts/consumer-check.c`) that calls `dgemm_`, `sgemm_`, `dsyev_`, `dgttrf_`, and `dgttrs_` links both archives, once as a consumer does and once with every object of `libopenblas.a`, and needs no shared library beyond the system ones above; on macOS, its minimum macOS version is the deployment target
+- on `x86_64-win7-windows-gnu`, the program links with the MinGW GCC driver, imports only system DLLs of Windows 7 (`KERNEL32.dll`, `msvcrt.dll`, `ADVAPI32.dll`, `SHELL32.dll`, `USER32.dll`), no `ucrtbase.dll` or `api-ms-win-*.dll`, and none of the functions of Windows 8 or later. The build lists these functions from the mingw-w64 headers of the toolchain: the functions that a header declares with `_WIN32_WINNT=0x0A00` and the newest `NTDDI_VERSION` and not with `_WIN32_WINNT=0x0601` (the headers guard them with `_WIN32_WINNT >= 0x0602` or the `NTDDI` macros), each header compiled on its own after `windows.h`, plus the exports that `msvcrt.dll` gained in Windows 8 and 8.1 (`msvcrt.def.in` of mingw-w64), which the headers do not guard. The list lacks the functions of Windows 8 or later that the headers declare without a guard, such as `GetSystemTimePreciseAsFileTime` and `WaitOnAddress`
 - the program computes the known results: natively on x86_64 Linux, under Wine on x86_64 Windows, and under `qemu-aarch64` on aarch64 Linux, there once with the detected core and once with each core forced through `OPENBLAS_CORETYPE`
 - the OpenBLAS tests pass (`make tests`: the BLAS, CBLAS, and unit tests), started directly on x86_64 Linux, under Wine on x86_64 Windows, and under `qemu-aarch64` on aarch64 Linux
 
@@ -64,8 +67,6 @@ The aarch64 archives leave out two cores, whose kernels compute wrong results on
 The aarch64 Linux builds also run the level-3 BLAS tests of the remaining SVE cores under `qemu-aarch64` at SVE vector lengths of 128, 256, and 512 bits, `NEOVERSEV1` without 512 bits (its DSYRK and DSYR2K kernels are wrong there, and OpenBLAS selects it only for Neoverse V1, whose SVE vector length is 256 bits), and of `CORTEXA72` once.
 
 The aarch64 Windows archive has the kernels of the aarch64 Linux archives, but OpenBLAS detects no CPU on Windows and uses the `ARMV8` kernels, unless `OPENBLAS_CORETYPE` names a core, for example `NEOVERSEN1`.
-
-`dev/x86_64-pc-windows-gnu.dockerfile` holds the MinGW GCC toolchain with msvcrt, which `build-all` does not build: flang-rt 22.1.8 does not compile against the msvcrt headers of mingw-w64 (it calls `timespec_get` with `TIME_UTC`, which only the UCRT has, and declares a `getpid` that conflicts with the one of `process.h`).
 
 ## WebAssembly
 

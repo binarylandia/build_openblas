@@ -17,9 +17,10 @@
 # The image provides the compilers and tools: CC (clang), FC (flang), HOSTCC
 # (the compiler of the build machine, for the build tools of OpenBLAS), AR, NM,
 # RANLIB, READELF, OBJDUMP, READOBJ, TARGET_RUNNER, the command that runs a
-# program of the target on the build machine (empty when it runs directly), and
+# program of the target on the build machine (empty when it runs directly),
 # TARGET_NO_RUN, the reason why programs of the target cannot run on the build
-# machine (empty when they can). Each archive holds libopenblas.a and the
+# machine (empty when they can), and CONSUMER_CC, the C compiler that consumers
+# link with when it is not CC. Each archive holds libopenblas.a and the
 # Fortran runtime libflang_rt.runtime.a of the flang that compiled LAPACK, with
 # the license of flang-rt and the patches that the build applied to its source,
 # so a program that links both needs no other runtime than the C library of the
@@ -29,6 +30,7 @@
 #   CROSS_TARGET=x86_64-unknown-linux-gnu ./build
 #   CROSS_TARGET=aarch64-unknown-linux-musl ./build 'VARIANTS="plain threads" ./scripts/main'
 #   CROSS_TARGET=x86_64-pc-windows-gnullvm ./build
+#   CROSS_TARGET=x86_64-win7-windows-gnu ./build
 #
 set -euo pipefail
 trap "exit" INT
@@ -558,6 +560,13 @@ main() {
   if [[ ! -f "${flang_rt}" ]]; then
     printf 'ERROR: %s finds no libflang_rt.runtime.a for %s\n' "${CC}" "${CROSS_TARGET}" >&2
     exit 1
+  fi
+
+  # The functions of Windows 8 or later, which the Windows 7 programs of the
+  # checks must not import.
+  if [[ "${CROSS_TARGET}" == *-win7-windows-gnu ]]; then
+    WINDOWS8_FUNCTIONS="${BUILD_DIR}/${CROSS_TARGET}-windows8-functions.txt"
+    write_windows8_functions "${WINDOWS8_FUNCTIONS}" "${BUILD_DIR}/${CROSS_TARGET}-windows8-functions"
   fi
 
   for variant in ${VARIANTS}; do
