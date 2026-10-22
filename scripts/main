@@ -58,9 +58,9 @@ build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 # of that CPU, and on aarch64 the -march of its target CPU for the rest of the
 # code (Makefile.arm64), which is within the baseline.
 : "${TARGET_CPU_FLAGS:?TARGET_CPU_FLAGS names the CPU flags of the target}"
-export CFLAGS="-w -fPIC ${TARGET_CPU_FLAGS} ${CFLAGS:-}"
-export FFLAGS="-w -fPIC ${TARGET_CPU_FLAGS} ${FFLAGS:-}"
-export LDFLAGS="-fPIC ${LDFLAGS:-}"
+export CFLAGS="-w -fPIC ${TARGET_CPU_FLAGS}${CFLAGS:+ ${CFLAGS}}"
+export FFLAGS="-w -fPIC ${TARGET_CPU_FLAGS}${FFLAGS:+ ${FFLAGS}}"
+export LDFLAGS="-fPIC${LDFLAGS:+ ${LDFLAGS}}"
 if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
   export CFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${CFLAGS}"
   export FFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${FFLAGS}"
@@ -491,19 +491,26 @@ function build_variant() {
   fi
 
   local archive="${outdir}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}-${build_time}.tar.xz"
-  package "${install_dir}" "${archive}"
-  write_metadata "${archive}" "$(variant_metadata "${variant}" "${install_dir}")"
+  local fields
+  fields="$(variant_metadata "${variant}" "${install_dir}")"
+  package_with_record "${install_dir}" "${archive}" "${fields}"
   printf 'Built %s\n' "${archive##*/}"
 }
 
-# Print the metadata fields of an archive as a JSON object.
+# Print the fields of the build record of an archive as a JSON object: the
+# sources, the compilers and their flags (cflags and fflags, the C and Fortran
+# flags that the build passes, before the flags that OpenBLAS adds; cpu_flags and
+# fortran_cpu_flags, the CPU flags among them), the toolchain releases, and the
+# flang runtime with the compiler and flags of its build, which the image
+# records in share/flang-rt/build.json of LLVM_DIR. macosx_deployment_target and
+# win32_winnt name the oldest macOS and Windows versions where they apply.
 function variant_metadata() {
   local variant="${1}"
   local install_dir="${2}"
-  local contents
-  contents="$(find "${install_dir}" -type f -printf '%P\n' | LC_ALL=C sort | jq -R . | jq -s .)"
   local patches
-  patches="$(jq '[.[] | select(startswith("share/doc/flang-rt/patches/"))]' <<<"${contents}")"
+  patches="$(archive_contents "${install_dir}" | jq '[.[] | select(startswith("share/doc/flang-rt/patches/"))]')"
+  local flang_rt_build
+  flang_rt_build="$(jq -c '{compiler, cflags, cpu_flags}' "${LLVM_DIR}/share/flang-rt/build.json")"
   jq -n \
     --arg variant "${variant}" \
     --arg openblas "${OPENBLAS_VERSION}" \
@@ -517,9 +524,15 @@ function variant_metadata() {
     --arg llvm_source_sha256 "${LLVM_SOURCE_SHA256:?}" \
     --arg target_toolchain "${TARGET_TOOLCHAIN_URL:?}" \
     --arg target_toolchain_sha256 "${TARGET_TOOLCHAIN_SHA256:?}" \
+    --arg cflags "${CFLAGS}" \
+    --arg cpu_flags "${TARGET_CPU_FLAGS}" \
+    --arg fflags "${FFLAGS}" \
+    --arg fortran_cpu_flags "${TARGET_CPU_FLAGS}" \
+    --arg macosx_deployment_target "${MACOSX_DEPLOYMENT_TARGET:-}" \
+    --arg win32_winnt "${WIN32_WINNT:-}" \
     --arg flang_rt_sha256 "$(sha256sum "${install_dir}/lib/libflang_rt.runtime.a" | cut -d' ' -f1)" \
+    --argjson flang_rt_build "${flang_rt_build}" \
     --argjson patches "${patches}" \
-    --argjson contents "${contents}" \
     '{
       kind: "native",
       variant: $variant,
@@ -528,22 +541,27 @@ function variant_metadata() {
       source: $source,
       source_sha256: $source_sha256,
       compiler: $compiler,
+      cflags: $cflags,
+      cpu_flags: $cpu_flags,
       fortran_compiler: $fortran_compiler,
+      fflags: $fflags,
+      fortran_cpu_flags: $fortran_cpu_flags,
       llvm: $llvm,
       target_toolchain: {
         url: $target_toolchain,
         sha256: $target_toolchain_sha256
       },
-      flang_rt: {
+      flang_rt: ({
         file: "lib/libflang_rt.runtime.a",
         sha256: $flang_rt_sha256,
         source: $llvm_source,
         source_sha256: $llvm_source_sha256,
         patches: $patches,
         build_script: "docker/files/build-llvm-runtimes"
-      },
-      contents: $contents
-    }'
+      } + $flang_rt_build)
+    }
+    + (if $macosx_deployment_target == "" then {} else {macosx_deployment_target: $macosx_deployment_target} end)
+    + (if $win32_winnt == "" then {} else {win32_winnt: $win32_winnt} end)'
 }
 
 main() {

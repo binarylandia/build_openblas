@@ -17,7 +17,9 @@
 # Emscripten has no ABI guarantee between versions, so an archive links only
 # with the Emscripten version that built it. The package name carries that
 # version, and share/openblas/emscripten-version.txt holds the version file of
-# the Emscripten release.
+# the Emscripten release. share/build_openblas/build.json records the build:
+# the Emscripten version, the compiler, the C flags (the inherited CFLAGS, then
+# EMCC_CFLAGS, which adds -pthread for mt), and no CPU flags.
 #
 # Examples:
 #   CROSS_TARGET=wasm32-unknown-emscripten ./build
@@ -141,13 +143,13 @@ for variant in ${VARIANTS}; do
   )
   num_threads=1
   link_flags=()
-  emcc_cflags=""
+  emcc_cflags="${EMCC_CFLAGS:-}"
   if [[ "${variant}" == "mt" ]]; then
     flavor="-mt"
     make_vars+=(USE_LOCKING=1)
     num_threads=64
     link_flags=(-pthread -sPTHREAD_POOL_SIZE=1 -DON_THREAD)
-    emcc_cflags="-pthread"
+    emcc_cflags="${emcc_cflags:+${emcc_cflags} }-pthread"
   fi
 
   make_vars+=(NUM_THREADS="${num_threads}")
@@ -186,8 +188,7 @@ for variant in ${VARIANTS}; do
 
   install -D -m 0644 "${em_root}/emscripten-version.txt" "${install_dir}/share/${NAME}/emscripten-version.txt"
   archive="${OUT_DIR}/${build_time}/${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
-  package "${install_dir}" "${archive}"
-  write_metadata "${archive}" "$(jq -n \
+  fields="$(jq -n \
     --arg variant "${variant}" \
     --arg openblas "${OPENBLAS_VERSION}" \
     --arg openblas_commit "${OPENBLAS_COMMIT}" \
@@ -195,6 +196,10 @@ for variant in ${VARIANTS}; do
     --arg source_sha256 "${OPENBLAS_SOURCE_SHA256}" \
     --arg emscripten "${em_version}" \
     --arg compiler "$(emcc --version | head -1)" \
-    '{kind: "wasm", variant: $variant, openblas: $openblas, openblas_commit: $openblas_commit, source: $source, source_sha256: $source_sha256, emscripten: $emscripten, compiler: $compiler}')"
+    --arg cflags "${CFLAGS:-}" \
+    --arg emcc_cflags "${emcc_cflags}" \
+    '{kind: "wasm", variant: $variant, openblas: $openblas, openblas_commit: $openblas_commit, source: $source, source_sha256: $source_sha256, emscripten: $emscripten, compiler: $compiler,
+      cflags: ([$cflags, $emcc_cflags] | map(select(. != "")) | join(" "))}')"
+  package_with_record "${install_dir}" "${archive}" "${fields}"
   printf 'Built %s\n' "${NAME}-static${flavor}-${OPENBLAS_VERSION}-${CROSS_TARGET}.${em_version}-${build_time}.tar.xz"
 done

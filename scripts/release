@@ -14,12 +14,13 @@
 #     WebAssembly archives
 #   - points at the commit that built the archives, which must be clean and
 #     pushed to origin
-#   - carries the archives, SHA256SUMS, and manifest.json with the metadata of
-#     every archive (target, variant, OpenBLAS version and commit, source and its
-#     sha256, compilers, the LLVM release and the target toolchain (GCC,
-#     osxcross, or llvm-mingw) of native archives, the flang runtime in the
-#     archive, the files in the archive, build image file and its sha256, build
-#     commit)
+#   - carries the archives, SHA256SUMS, and manifest.json with the build record
+#     of every archive (target, variant, OpenBLAS version and commit, source and
+#     its sha256, compilers and their flags, the LLVM release and the target
+#     toolchain (GCC, osxcross, or llvm-mingw) of native archives, the flang
+#     runtime in the archive, the files in the archive, build image file and its
+#     sha256, build commit), which each archive also holds as
+#     share/build_openblas/build.json
 #
 # A published release is never changed: the script stops when the release
 # exists. A fixed archive goes into a new release.
@@ -58,7 +59,7 @@ function check_commit() {
   fi
 }
 
-# Fail unless every metadata file comes from a clean build of the commit and
+# Fail unless every build record comes from a clean build of the commit and
 # names files that exist.
 function check_metadata() {
   local out_dir="${1}"
@@ -95,7 +96,7 @@ function write_notes() {
       "| Target | Variant | Compiler | Fortran compiler |",
       "| --- | --- | --- | --- |",
       (.archives[] | "| `\(.target)` | \(.variant) | \(.compiler) | \(.fortran_compiler // "none") |"),
-      "\n`SHA256SUMS` lists the checksums of the archives, and `manifest.json` the metadata of every archive."
+      "\n`SHA256SUMS` lists the checksums of the archives, and `manifest.json` the build record of every archive, which the archive also holds as `share/build_openblas/build.json`."
     ' "${manifest}"
   } >"${notes}"
 }

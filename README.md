@@ -47,6 +47,7 @@ An archive holds:
 
 - `lib/libopenblas.a`: BLAS, CBLAS, LAPACK, and LAPACKE, with the kernels of every CPU of the architecture (`DYNAMIC_ARCH`)
 - `lib/libflang_rt.runtime.a`: the Fortran runtime of the flang that compiled LAPACK, static and position-independent, with its license in `share/doc/flang-rt/LICENSE.TXT` and the patches of its source in `share/doc/flang-rt/patches/`
+- `share/build_openblas/build.json`: the build record of the archive, the entry of the archive in the `manifest.json` of its release (see below)
 - headers, and pkg-config and CMake files that name both libraries. The pkg-config file `lib/pkgconfig/openblas.pc` names its folders relative to itself (`libdir=${pcfiledir}/..`, `includedir=${pcfiledir}/../../include`), so `PKG_CONFIG_LIBDIR=<folder>/lib/pkgconfig pkg-config --libs --cflags openblas` works wherever the archive is unpacked
 
 A program links both archives and then needs only the C library of the target:
@@ -98,7 +99,7 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 ## Building and releasing
 
 ```bash
-# Native targets into .out/<build time>/, with one metadata file per archive
+# Native targets into .out/<build time>/, with one build record (<archive>.json) per archive
 BUILD_TIME="$(date -u '+%Y-%m-%d_%H-%M-%S')" ./build-all
 # One target, or some variants of it
 CROSS_TARGET=aarch64-unknown-linux-gnu ./build
@@ -115,7 +116,23 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 - The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The distribution packages of the images (yum, apt) come from their mirrors and are not pinned
 - Archives list their files in sorted order with one owner and the commit time, so the same files give the same archive
 - `scripts/release` publishes only a build of a clean, pushed commit, and never changes a published release
-- Each release has `SHA256SUMS` and `manifest.json`, which records for every archive its target, variant, OpenBLAS version and commit, source and sha256, compilers, LLVM release, target toolchain archive and sha256, flang-rt file, sha256, and patches, the files in the archive, build image file and sha256, and build commit
+- Each release has `SHA256SUMS` and `manifest.json`, which holds the build record of every archive. Each archive also holds its own record as `share/build_openblas/build.json`, so an unpacked archive names the toolchain that built it:
+
+| Field | Value |
+| --- | --- |
+| `target`, `variant`, `kind` | target triple, variant, `native` or `wasm` |
+| `openblas`, `openblas_commit`, `source`, `source_sha256` | OpenBLAS version, commit, and source archive |
+| `compiler`, `fortran_compiler` | first line of `--version` of the C and Fortran compilers |
+| `cflags`, `fflags` | C and Fortran flags that the build passes; OpenBLAS adds its own after them. On WebAssembly, `cflags` is the inherited `CFLAGS` followed by `EMCC_CFLAGS`, which emcc appends after the OpenBLAS flags |
+| `cpu_flags`, `fortran_cpu_flags` | CPU flags among them (native only) |
+| `llvm` | `binarylandia/build_llvm` release of clang and flang (native only) |
+| `target_toolchain.url`, `target_toolchain.sha256` | GCC, osxcross, or llvm-mingw archive (native only) |
+| `flang_rt` | file, sha256, LLVM source, patches, and the `compiler`, `cflags`, and `cpu_flags` of the flang-rt build (native only) |
+| `macosx_deployment_target` | oldest macOS version (macOS only) |
+| `win32_winnt` | `_WIN32_WINNT` of the oldest Windows version (`x86_64-win7-windows-gnu` only) |
+| `emscripten` | Emscripten version (WebAssembly only) |
+| `contents`, `files`, `name` | files in the archive, archive file name, and name without extension |
+| `dockerfile`, `dockerfile_sha256`, `build_commit`, `build_dirty`, `build_time` | build image file and sha256, commit of this repository, and build time |
 
 ## Features
 

@@ -22,6 +22,9 @@ OPENBLAS_SOURCE_URL="https://github.com/OpenMathLib/OpenBLAS/archive/${OPENBLAS_
 OPENBLAS_SOURCE_SHA256="f3158e302ce82a0e813db977441ce03987dc0e6c4b3e6e30b5701aa4a10e8ecd"
 OPENBLAS_VERSION="${OPENBLAS_BASE_TAG#v}-${OPENBLAS_COMMITS_AFTER_TAG}-g${OPENBLAS_COMMIT:0:8}"
 
+# The build record inside each archive (see package_with_record).
+BUILD_RECORD="share/build_openblas/build.json"
+
 function abspath() {
   readlink -m "$1"
 }
@@ -132,15 +135,47 @@ function check_pkg_config() {
   fi
 }
 
-# Write <archive>.json next to an archive: the fields of a JSON object and the
-# build provenance that ./build passes in. scripts/release puts these files into
-# the manifest of a release.
-function write_metadata() {
+# Package an installation into an archive with its build record, and write the
+# record next to the archive as <archive>.json, which scripts/release puts into
+# the manifest of a release. The record holds the fields of a JSON object, the
+# files of the archive (contents), and the build provenance that ./build passes
+# in; the archive holds it as share/build_openblas/build.json.
+function package_with_record() {
+  local install_dir="${1}"
+  local archive="${2}"
+  local fields="${3}"
+  local contents
+  contents="$(archive_contents "${install_dir}")" || return
+  local record
+  record="$(archive_record "${archive}" "${fields}" "${contents}")" || return
+  mkdir -p "$(dirname "${install_dir}/${BUILD_RECORD}")"
+  printf '%s\n' "${record}" >"${install_dir}/${BUILD_RECORD}"
+  package "${install_dir}" "${archive}" || return
+  check_archive_contents "${archive}" "${record}" || return
+  printf '%s\n' "${record}" >"${archive%.tar.xz}.json"
+}
+
+# Print the files of an installation, with the build record that
+# package_with_record adds, as a sorted JSON array.
+function archive_contents() {
+  local install_dir="${1}"
+  local files
+  files="$(find "${install_dir}" -type f -printf '%P\n')" || {
+    printf 'ERROR: cannot list the files of %s\n' "${install_dir}" >&2
+    return 1
+  }
+  printf '%s\n' ${files:+"${files}"} "${BUILD_RECORD}" | LC_ALL=C sort -u | jq -R . | jq -s .
+}
+
+# Print the build record of an archive as JSON.
+function archive_record() {
   local archive="${1}"
   local fields="${2}"
+  local contents="${3}"
   local file="${archive##*/}"
   jq -n \
     --argjson fields "${fields}" \
+    --argjson contents "${contents}" \
     --arg name "${file%.tar.xz}" \
     --arg target "${CROSS_TARGET:?}" \
     --arg dockerfile "dev/${CROSS_TARGET}.dockerfile" \
@@ -150,6 +185,7 @@ function write_metadata() {
     --arg build_time "${build_time:?}" \
     --arg file "${file}" \
     '$fields + {
+      contents: $contents,
       name: $name,
       target: $target,
       dockerfile: $dockerfile,
@@ -158,6 +194,20 @@ function write_metadata() {
       build_dirty: ($build_dirty == "true"),
       build_time: $build_time,
       files: [$file]
-    }' \
-    >"${archive%.tar.xz}.json"
+    }'
+}
+
+# Fail unless the files of an archive are the contents of its build record.
+function check_archive_contents() {
+  local archive="${1}"
+  local record="${2}"
+  local listed
+  local expected
+  listed="$(tar -tJf "${archive}" | sed '/\/$/d' | LC_ALL=C sort)" || return
+  expected="$(jq -r '.contents[]' <<<"${record}")" || return
+  if [[ "${listed}" != "${expected}" ]]; then
+    printf 'ERROR: the files of %s differ from the contents of its build record:\n%s\n' "${archive}" \
+      "$(diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${listed}"))" >&2
+    return 1
+  fi
 }
