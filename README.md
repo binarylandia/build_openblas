@@ -36,7 +36,7 @@ An archive holds:
 
 - `lib/libopenblas.a`: BLAS, CBLAS, LAPACK, and LAPACKE, with the kernels of every CPU of the architecture (`DYNAMIC_ARCH`)
 - `lib/libflang_rt.runtime.a`: the Fortran runtime of the flang that compiled LAPACK, static and position-independent, with its license in `share/doc/flang-rt/LICENSE.TXT` and the patches of its source in `share/doc/flang-rt/patches/`
-- headers, and pkg-config and CMake files that name both libraries
+- headers, and pkg-config and CMake files that name both libraries. The pkg-config file `lib/pkgconfig/openblas.pc` names its folders relative to itself (`libdir=${pcfiledir}/..`, `includedir=${pcfiledir}/../../include`), so `PKG_CONFIG_LIBDIR=<folder>/lib/pkgconfig pkg-config --libs --cflags openblas` works wherever the archive is unpacked
 
 A program links both archives and then needs only the C library of the target:
 
@@ -51,6 +51,7 @@ Every build checks each archive:
 
 - the kernels of every core of `DYNAMIC_ARCH` are present
 - `libopenblas.a` calls no gfortran runtime, `libflang_rt.runtime.a` defines every Fortran runtime function that it calls, and neither archive needs a C++ runtime
+- pkg-config, with the pkg-config file of the archive as its only search folder, names the library and header folders of the archive, `-lopenblas`, and `-lflang_rt.runtime`
 - on macOS, no object needs a newer macOS than the deployment target, and both archives have the BSD symbol table that the linker of Xcode needs
 - a C program (`scripts/consumer-check.c`) that calls `dgemm_`, `sgemm_`, `dsyev_`, `dgttrf_`, and `dgttrs_` links both archives, once as a consumer does and once with every object of `libopenblas.a`, and needs no shared library beyond the system ones above; on macOS, its minimum macOS version is the deployment target
 - on `x86_64-win7-windows-gnu`, the program links with the MinGW GCC driver, imports only system DLLs of Windows 7 (`KERNEL32.dll`, `msvcrt.dll`, `ADVAPI32.dll`, `SHELL32.dll`, `USER32.dll`), no `ucrtbase.dll` or `api-ms-win-*.dll`, and none of the functions of Windows 8 or later. The build lists these functions from the mingw-w64 headers of the toolchain: the functions that a header declares with `_WIN32_WINNT=0x0A00` and the newest `NTDDI_VERSION` and not with `_WIN32_WINNT=0x0601` (the headers guard them with `_WIN32_WINNT >= 0x0602` or the `NTDDI` macros), each header compiled on its own after `windows.h`, plus the exports that `msvcrt.dll` gained in Windows 8 and 8.1 (`msvcrt.def.in` of mingw-w64), which the headers do not guard. The list lacks the functions of Windows 8 or later that the headers declare without a guard, such as `GetSystemTimePreciseAsFileTime` and `WaitOnAddress`
@@ -76,6 +77,8 @@ The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=W
 - **mt**: For modules with threads (`-pthread`). Every object is compiled with atomics, which `wasm-ld` requires for shared memory, and `USE_LOCKING=1` locks the work buffers, so threads can call BLAS at the same time. OpenBLAS's own thread pool stays off
 
 Emscripten has no ABI guarantee between versions, so an archive links only with the Emscripten version that built it. The version is part of the file name (`wasm32-unknown-emscripten.6.0.10`) and is stored in `share/openblas/emscripten-version.txt`.
+
+The WebAssembly archives have the same relocatable pkg-config file, without the Fortran runtime.
 
 ```bash
 CROSS_TARGET=wasm32-unknown-emscripten ./build

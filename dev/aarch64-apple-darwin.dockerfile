@@ -24,6 +24,7 @@ RUN set -euxo pipefail >/dev/null \
   make \
   parallel \
   patch \
+  pkgconfig \
   sudo \
   tar \
   xz \

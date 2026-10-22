@@ -72,6 +72,66 @@ function fetch_source() {
   tar -xzf "${tarball}" -C "${src_dir}" --strip-components=1
 }
 
+# Make the pkg-config file of an installation relocatable: OpenBLAS writes the
+# installation prefix of the build into libdir and includedir, which do not
+# exist where a consumer unpacks the archive. Both name folders relative to the
+# file (${pcfiledir}) instead, so the unpacked archive works in any folder.
+function relocate_pkg_config() {
+  local install_dir="${1}"
+  local pc="${install_dir}/lib/pkgconfig/openblas.pc"
+  if ! grep -q '^libdir=' "${pc}" || ! grep -q '^includedir=' "${pc}"; then
+    printf 'ERROR: %s has no libdir= or no includedir= line; update relocate_pkg_config for this OpenBLAS version.\n' "${pc}" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2016 # pkg-config expands ${pcfiledir}
+  sed -i \
+    -e 's|^libdir=.*$|libdir=${pcfiledir}/..|' \
+    -e 's|^includedir=.*$|includedir=${pcfiledir}/../../include|' \
+    "${pc}"
+}
+
+# Fail unless pkg-config, with the pkg-config file of an installation as its
+# only search folder, names the library and header folders of the installation
+# and each given library flag (-lopenblas). pkg-config prints the folders
+# relative to the file (lib/pkgconfig/..), so they are compared after
+# resolution.
+function check_pkg_config() {
+  local install_dir="${1}"
+  shift
+  local pc_dir="${install_dir}/lib/pkgconfig"
+  local libs
+  local cflags
+  libs="$(PKG_CONFIG_PATH="" PKG_CONFIG_LIBDIR="${pc_dir}" pkg-config --libs openblas)" || return
+  cflags="$(PKG_CONFIG_PATH="" PKG_CONFIG_LIBDIR="${pc_dir}" pkg-config --cflags openblas)" || return
+  local lib_dir
+  local include_dir
+  lib_dir="$(realpath "${install_dir}/lib")" || return
+  include_dir="$(realpath "${install_dir}/include")" || return
+  local words=()
+  read -ra words <<<"${libs} ${cflags}"
+  local word
+  local found_lib_dir=false
+  local found_include_dir=false
+  for word in "${words[@]}"; do
+    if [[ "${word}" == -L* && "$(realpath -m "${word#-L}")" == "${lib_dir}" ]]; then
+      found_lib_dir=true
+    elif [[ "${word}" == -I* && "$(realpath -m "${word#-I}")" == "${include_dir}" ]]; then
+      found_include_dir=true
+    fi
+  done
+  local missing=()
+  "${found_lib_dir}" || missing+=("-L${lib_dir}")
+  "${found_include_dir}" || missing+=("-I${include_dir}")
+  local flag
+  for flag in "$@"; do
+    [[ " ${libs} " == *" ${flag} "* ]] || missing+=("${flag}")
+  done
+  if ((${#missing[@]} > 0)); then
+    printf 'ERROR: pkg-config prints "%s" and "%s" for %s, without: %s\n' "${libs}" "${cflags}" "${pc_dir}/openblas.pc" "${missing[*]}" >&2
+    return 1
+  fi
+}
+
 # Write <archive>.json next to an archive: the fields of a JSON object and the
 # build provenance that ./build passes in. scripts/release puts these files into
 # the manifest of a release.

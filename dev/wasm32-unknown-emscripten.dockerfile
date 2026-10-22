@@ -21,6 +21,7 @@ RUN set -euxo pipefail >/dev/null \
   libc6-dev \
   make \
   patch \
+  pkg-config \
   python3 \
   sudo \
   xz-utils \

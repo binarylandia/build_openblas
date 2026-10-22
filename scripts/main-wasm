@@ -169,6 +169,8 @@ for variant in ${VARIANTS}; do
     tail -50 "${build_log}" >&2
     exit 1
   }
+  relocate_pkg_config "${install_dir}"
+  check_pkg_config "${install_dir}" -lopenblas
 
   lib="${install_dir}/lib/lib${NAME}.a"
   symbols="$(emnm "${lib}" 2>/dev/null)"
