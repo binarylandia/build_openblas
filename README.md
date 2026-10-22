@@ -25,6 +25,17 @@ Every native target builds with clang and flang of LLVM 22.1.8 ([binarylandia/bu
 | `x86_64-pc-windows-gnullvm`, `aarch64-pc-windows-gnullvm` | llvm-mingw of the LLVM release: mingw-w64 with the UCRT, compiler-rt | Windows 10; Windows 7 and 8 with the Universal C Runtime update (untested) |
 | `x86_64-win7-windows-gnu` | crosstool-NG MinGW GCC 16.2.0: mingw-w64 v14.0.0 with msvcrt, crt files, libgcc, winpthreads | Windows 7 |
 
+The C and Fortran code and flang-rt compile for the CPU baseline of the programs that link the archives (`TARGET_CPU_FLAGS` of the build image):
+
+| Target | CPU flags |
+| --- | --- |
+| x86_64 targets | `-march=x86-64-v2` |
+| `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-musl` | `-march=armv8-a -moutline-atomics` |
+| `aarch64-pc-windows-gnullvm` | `-march=armv8-a+lse` |
+| `aarch64-apple-darwin` | `-mcpu=apple-m1` |
+
+OpenBLAS adds the flags of a CPU after them for the kernels of that CPU, which it selects at run time (`DYNAMIC_ARCH`). On aarch64, it also adds the `-march` of its target CPU for the rest of the code (`Makefile.arm64`): `-march=armv8-a` for `ARMV8` (Linux and Windows) and `-march=armv8.3-a` for `VORTEX` (macOS), so that code compiles for Armv8.0 without LSE on Windows and for Armv8.3 on macOS, both within the baseline.
+
 The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`), with the patches of `patches/llvm-<version>/flang-rt/`, which apply only to that LLVM version. The patches of LLVM 22.1.8 make flang-rt compile with the libstdc++ headers and the msvcrt headers of mingw-w64:
 
 - `0001-mingw-getpid.patch`: uses the `getpid` of `process.h`, which the libstdc++ headers include through `pthread.h` of winpthreads, in place of the `getpid` that flang-rt defines for Windows with another return type

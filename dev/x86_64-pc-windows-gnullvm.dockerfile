@@ -88,6 +88,13 @@ RUN set -euxo pipefail >/dev/null \
 && ls "${LLVM_DIR}/lib/clang/22/lib/windows/libclang_rt.builtins-x86_64.a" \
 && "${LLVM_DIR}/bin/${TRIPLET}-clang" --version
 
+# The CPU baseline of the programs that link the archives: x86-64-v2 (SSE4.2,
+# POPCNT, CMPXCHG16B; Intel Nehalem, AMD Bulldozer, or newer).
+# The C and Fortran code of OpenBLAS and flang-rt compile with these flags.
+# OpenBLAS adds CPU flags after them (Makefile.<arch>) for the kernels that it
+# selects at run time, and on aarch64 also for its target CPU.
+ENV TARGET_CPU_FLAGS="-march=x86-64-v2"
+
 # flang for the target: --target=<triple> loads <normalized triple>-flang.cfg
 # (for example x86_64-w64-windows-gnu-flang.cfg), which names the sysroot,
 # compiler-rt, and lld, instead of the configuration of clang, whose C++

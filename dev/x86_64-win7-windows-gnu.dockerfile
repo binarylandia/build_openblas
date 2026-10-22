@@ -93,6 +93,15 @@ RUN set -euxo pipefail >/dev/null \
 && rm /tmp/download \
 && "${GCC_DIR}/bin/${TRIPLET}-gcc" -v
 
+# The CPU baseline of the programs that link the archives: x86-64-v2 (SSE4.2,
+# POPCNT, CMPXCHG16B; Intel Nehalem, AMD Bulldozer, or newer).
+# The C and Fortran code of OpenBLAS and flang-rt compile with these flags.
+# OpenBLAS adds CPU flags after them (Makefile.<arch>) for the kernels that it
+# selects at run time, and on aarch64 also for its target CPU.
+ENV TARGET_CPU_FLAGS="-march=x86-64-v2"
+# Windows 7, the oldest Windows version that the archives run on.
+ENV WIN32_WINNT="0x0601"
+
 # clang and flang for the target: --target=<triple> loads
 # <normalized triple>.cfg (clang, clang++) or <normalized triple>-flang.cfg
 # (flang) from the bin directory of LLVM, for example
@@ -112,13 +121,13 @@ RUN set -euxo pipefail >/dev/null \
 && normalized="$("${LLVM_DIR}/bin/clang" --target="${TRIPLET}" -print-target-triple)" \
 && printf -- '%s\n' \
   "--sysroot=${sysroot}" \
-  "-D_WIN32_WINNT=0x0601" \
+  "-D_WIN32_WINNT=${WIN32_WINNT}" \
   "-fuse-ld=bfd" \
   "-static-libgcc" \
   >"${LLVM_DIR}/bin/${normalized}.cfg" \
 && printf -- '%s\n' \
   "--sysroot=${sysroot}" \
-  "-D_WIN32_WINNT=0x0601" \
+  "-D_WIN32_WINNT=${WIN32_WINNT}" \
   "-fuse-ld=bfd" \
   >"${LLVM_DIR}/bin/${normalized}-flang.cfg" \
 && test "$("${LLVM_DIR}/bin/clang" --target="${TRIPLET}" -print-libgcc-file-name)" -ef "${GCC_DIR}/lib/gcc/${TRIPLET}/${GCC_VERSION}/libgcc.a" \

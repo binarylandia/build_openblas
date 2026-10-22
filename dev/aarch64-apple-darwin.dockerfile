@@ -85,6 +85,12 @@ RUN set -euxo pipefail >/dev/null \
 && ls "${SDKROOT}/usr/lib/libSystem.B.tbd" \
 && "${TRIPLET}-clang" --version
 
+# The CPU baseline of the programs that link the archives: Apple M1.
+# The C and Fortran code of OpenBLAS and flang-rt compile with these flags.
+# OpenBLAS adds CPU flags after them (Makefile.<arch>) for the kernels that it
+# selects at run time, and on aarch64 also for its target CPU.
+ENV TARGET_CPU_FLAGS="-mcpu=apple-m1"
+
 # flang for the target: --target=<triple> loads <triple>-flang.cfg from the bin
 # directory of LLVM, which names the SDK, the deployment target, and ld64.lld,
 # the flags that the osxcross wrappers add for clang.

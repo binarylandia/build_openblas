@@ -91,6 +91,14 @@ RUN set -euxo pipefail >/dev/null \
 && rm /tmp/download \
 && ${GCC_DIR}/bin/${TRIPLET}-gcc -v
 
+# The CPU baseline of the programs that link the archives: Armv8.0, with atomic
+# operations through the outline atomics helpers, which use the LSE
+# instructions when the CPU has them.
+# The C and Fortran code of OpenBLAS and flang-rt compile with these flags.
+# OpenBLAS adds CPU flags after them (Makefile.<arch>) for the kernels that it
+# selects at run time, and on aarch64 also for its target CPU.
+ENV TARGET_CPU_FLAGS="-march=armv8-a -moutline-atomics"
+
 # clang and flang for the target: --target=<triple> loads <triple>.cfg from the
 # bin directory of LLVM, which selects the sysroot and the GCC runtime (crt
 # files, libgcc, libstdc++ headers) of the crosstool-NG toolchain, and lld.

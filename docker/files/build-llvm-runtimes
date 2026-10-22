@@ -23,10 +23,17 @@
 # target in place, so an installation of LLVM compiles Fortran for one target.
 # The CUDA, PowerPC, and OpenMP modules of the release stay as they are.
 #
-# Both are static archives of position-independent code. flang-rt has no shared
-# library and no REAL(16) math, which would need libquadmath. The flang driver
-# links the builtins after libgcc on aarch64 Linux, so a Fortran program links
-# only when the builtins of the target exist.
+# Both are static archives of position-independent code, compiled with the CPU
+# flags of TARGET_CPU_FLAGS (-march=x86-64-v2), the CPU baseline of the
+# programs that link them. flang-rt has no shared library and no REAL(16) math,
+# which would need libquadmath. The flang driver links the builtins after
+# libgcc on aarch64 Linux, so a Fortran program links only when the builtins of
+# the target exist.
+#
+# share/flang-rt/build.json of LLVM_DIR records the C++ compiler of the flang-rt
+# build, its flags, and the CPU flags among them:
+#
+#   {"compiler": "clang version 22.1.8 (...)", "cflags": "-march=x86-64-v2 -O3 -DNDEBUG", "cpu_flags": "-march=x86-64-v2"}
 #
 # The compilers are clang, clang++, and flang of LLVM_DIR (default /opt/llvm)
 # with --target=<triple>, which load the configuration files <triple>.cfg or
@@ -52,6 +59,7 @@ set -euo pipefail
 trap "exit" INT
 
 LLVM_DIR="${LLVM_DIR:-/opt/llvm}"
+TARGET_CPU_FLAGS="${TARGET_CPU_FLAGS:?TARGET_CPU_FLAGS names the CPU flags of the target, for example -march=x86-64-v2}"
 PATCHES_DIR="${PATCHES_DIR:-/usr/local/share/build-llvm-runtimes/patches}"
 
 # The parts of the LLVM source tree that the runtimes build reads.
@@ -208,6 +216,8 @@ function configure() {
   cmake -S "${src_dir}/runtimes" -B "${build_dir}" \
     "${target_args[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="${TARGET_CPU_FLAGS}" \
+    -DCMAKE_CXX_FLAGS="${TARGET_CPU_FLAGS}" \
     -DCMAKE_INSTALL_PREFIX="${LLVM_DIR}" \
     -DCMAKE_Fortran_COMPILER_WORKS=ON \
     -DCMAKE_AR="${bin}/llvm-ar" \
@@ -266,6 +276,36 @@ function build_and_install() {
   esac
 }
 
+# Write the C++ compiler of the flang-rt build, its flags (the flags of the
+# release build type after the configured ones, as CMake passes them), and the
+# CPU flags among them, as JSON.
+function write_build_record() {
+  local build_dir="${1}"
+  local record="${2}"
+  local cache
+  cache="$(cmake -N -LA "${build_dir}")" || return
+  local compiler
+  local flags
+  local release_flags
+  compiler="$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' <<<"${cache}")"
+  flags="$(sed -n 's/^CMAKE_CXX_FLAGS:[A-Z]*=//p' <<<"${cache}")"
+  release_flags="$(sed -n 's/^CMAKE_CXX_FLAGS_RELEASE:[A-Z]*=//p' <<<"${cache}")"
+  if [[ -z "${compiler}" || "${flags}" != "${TARGET_CPU_FLAGS}" ]]; then
+    printf 'ERROR: the CMake cache of %s names the C++ compiler "%s" with the flags "%s", expected the flags "%s"\n' \
+      "${build_dir}" "${compiler}" "${flags}" "${TARGET_CPU_FLAGS}" >&2
+    return 1
+  fi
+  local version
+  version="$("${compiler}" --version | head -1)" || return
+  mkdir -p "$(dirname "${record}")"
+  jq -n \
+    --arg compiler "${version}" \
+    --arg cflags "${flags} ${release_flags}" \
+    --arg cpu_flags "${TARGET_CPU_FLAGS}" \
+    '{compiler: $compiler, cflags: $cflags, cpu_flags: $cpu_flags}' \
+    >"${record}"
+}
+
 main() {
   show_help() {
     sed -n '2,${/^#/!q; s/^# \?//p}' "${BASH_SOURCE[0]}" | sed "s|\$0|${0##*/}|g"
@@ -292,6 +332,7 @@ main() {
   build_intrinsic_modules "${work_dir}/src" "${triple}"
   configure "${work_dir}/src" "${work_dir}/build" "${triple}"
   build_and_install "${work_dir}/build" "${triple}"
+  write_build_record "${work_dir}/build" "${LLVM_DIR}/share/flang-rt/build.json"
   install -D -m 0644 "${work_dir}/src/flang-rt/LICENSE.TXT" "${LLVM_DIR}/share/doc/flang-rt/LICENSE.TXT"
   local patch_file
   for patch_file in "${work_dir}/patches"/*.patch; do

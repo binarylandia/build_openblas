@@ -53,8 +53,13 @@ OUT_DIR="$(abspath ".out")"
 INSTALL_ROOT="/opt/${NAME}"
 build_time="${BUILD_TIME:-"$(date -u '+%Y-%m-%d_%H-%M-%S')"}"
 
-export CFLAGS="-w -fPIC ${CFLAGS:-}"
-export FFLAGS="-w -fPIC ${FFLAGS:-}"
+# The CPU baseline of the target (TARGET_CPU_FLAGS of the image) applies to the
+# C and Fortran code. OpenBLAS adds the flags of a CPU after it for the kernels
+# of that CPU, and on aarch64 the -march of its target CPU for the rest of the
+# code (Makefile.arm64), which is within the baseline.
+: "${TARGET_CPU_FLAGS:?TARGET_CPU_FLAGS names the CPU flags of the target}"
+export CFLAGS="-w -fPIC ${TARGET_CPU_FLAGS} ${CFLAGS:-}"
+export FFLAGS="-w -fPIC ${TARGET_CPU_FLAGS} ${FFLAGS:-}"
 export LDFLAGS="-fPIC ${LDFLAGS:-}"
 if [[ "${CROSS_TARGET}" =~ (apple|darwin) ]]; then
   export CFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET} ${CFLAGS}"
