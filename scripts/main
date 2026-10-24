@@ -211,6 +211,23 @@ function prepare_source() {
     printf 'ERROR: %s still sets .subsections_via_symbols; update the edit for this OpenBLAS version.\n' "${src_dir}/common_x86_64.h" >&2
     return 1
   fi
+
+  # On Windows, exports.h defines OPENBLAS_EXPORT as dllexport also for the
+  # static library. Each object then carries -export:<symbol> directives in its
+  # .drectve section, and the linker adds these symbols to the export table of
+  # every program and DLL that links the archive, which no linker option of the
+  # consumer removes. The build makes only static archives, so OPENBLAS_EXPORT
+  # stays empty on Windows (check_archive_exports).
+  local exports_h
+  for exports_h in exports.h lapack-netlib/LAPACKE/include/exports.h; do
+    sed -i -E 's/^(#[[:space:]]*define[[:space:]]+OPENBLAS_EXPORT)[[:space:]]+.*dllexport.*$/\1/' "${src_dir}/${exports_h}"
+  done
+  local dllexport
+  dllexport="$(grep -rlI dllexport "${src_dir}")" || (($? == 1)) || return
+  if [[ -n "${dllexport}" ]]; then
+    printf 'ERROR: these sources still mark functions dllexport; update the edit for this OpenBLAS version:\n%s\n' "${dllexport}" >&2
+    return 1
+  fi
 }
 
 # Print the archive members that set MH_SUBSECTIONS_VIA_SYMBOLS and define .L
@@ -342,6 +359,11 @@ function check_archive() {
     check_macos_version_min "${lib}" "${install_dir}/lib/libflang_rt.runtime.a" || return
     check_bsd_symbol_table "${lib}" || return
     check_bsd_symbol_table "${install_dir}/lib/libflang_rt.runtime.a" || return
+  fi
+
+  if [[ "${CROSS_TARGET}" == *-windows-* ]]; then
+    check_archive_exports "${lib}" || return
+    check_archive_exports "${install_dir}/lib/libflang_rt.runtime.a" || return
   fi
 
   # Reject an archive without the kernels of a requested core. OpenBLAS can

@@ -297,6 +297,39 @@ function check_windows_dependencies() {
   printf 'System dependencies of %s: %s\n' "${program##*/}" "$(paste -sd ' ' - <<<"${dlls}")"
 }
 
+# Fail when an object of a Windows archive carries an export directive
+# (-export:<symbol> in its .drectve section). The linker adds each such symbol
+# to the export table of every program and DLL that links the archive, and no
+# linker option of the consumer removes it. The linker reads the directives
+# case-insensitively, with - or / in front.
+function check_archive_exports() {
+  local lib="${1}"
+  local directives
+  directives="$("${READOBJ:?}" --coff-directives "${lib}")" || return
+  local exports
+  exports="$(awk '/^File: / {member = $2} {
+    for (i = 1; i <= NF; i++) if (tolower($i) ~ /^[-\/]export:/) print member " " $i
+  }' <<<"${directives}")" || return
+  if [[ -n "${exports}" ]]; then
+    printf 'ERROR: %s has %s export directives, which make consumers export its symbols:\n%s\n' "${lib}" "$(wc -l <<<"${exports}")" "${exports}" >&2
+    return 1
+  fi
+}
+
+# Fail when a Windows program has an export table: a program that links the
+# archives exports none of their symbols.
+function check_program_exports() {
+  local program="${1}"
+  local exports
+  exports="$("${READOBJ:?}" --coff-exports "${program}")" || return
+  local names
+  names="$(sed -n 's/^[[:space:]]*Name: //p' <<<"${exports}")"
+  if [[ -n "${names}" ]]; then
+    printf 'ERROR: %s exports symbols: %s\n' "${program}" "$(paste -sd ' ' - <<<"${names}")" >&2
+    return 1
+  fi
+}
+
 # Fail unless a Windows program imports only the DLLs of WINDOWS7_SYSTEM_DLLS,
 # none of the UCRT (ucrtbase.dll, api-ms-win-*), and none of the functions of
 # Windows 8 or later that the file WINDOWS8_FUNCTIONS lists
@@ -501,6 +534,9 @@ function check_consumer() {
   # shellcheck disable=SC2086 # the compiler and the link flags are words
   ${consumer_cc} -O2 -o "${program}" "${CONSUMER_CHECK_SOURCE}" "${lib}" "${flang_rt}" ${link_flags} || return
   check_system_dependencies "${program}" || return
+  if [[ "${CROSS_TARGET}" == *-windows-* ]]; then
+    check_program_exports "${program}" || return
+  fi
 
   # The program again with every object of libopenblas.a, so that every
   # function of OpenBLAS links with flang-rt and the system libraries alone.
@@ -513,6 +549,9 @@ function check_consumer() {
   # shellcheck disable=SC2086 # the compiler and the link flags are words
   ${consumer_cc} -O2 -o "${program_all}" "${CONSUMER_CHECK_SOURCE}" "${whole_archive[@]}" "${flang_rt}" ${link_flags} || return
   check_system_dependencies "${program_all}" || return
+  if [[ "${CROSS_TARGET}" == *-windows-* ]]; then
+    check_program_exports "${program_all}" || return
+  fi
 
   if ! target_runs; then
     printf 'Linked %s without running it: %s\n' "${program##*/}" "${TARGET_NO_RUN}"
