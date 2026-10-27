@@ -57,8 +57,8 @@ ENV TRIPLET="arm64-apple-darwin20.2"
 ENV MACOSX_DEPLOYMENT_TARGET="11.0"
 ENV OSXCROSS_DIR="/opt/osxcross"
 ENV SDKROOT="${OSXCROSS_DIR}/SDK/MacOSX11.1.sdk"
-ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_osxcross/releases/download/osxcross-27d21e4-sdk11.1-2026-10-18_09-15-29/osxcross-27d21e4-2026-10-18_09-15-29.tar.zst"
-ENV TARGET_TOOLCHAIN_SHA256="3013322802c7e765dc1320f4f97ea952673f6e2efbe12b1b7a4c0ec75aff03db"
+ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_osxcross/releases/download/osxcross-27d21e4-sdk11.1-2026-10-27_18-18-20/osxcross-27d21e4-2026-10-27_18-18-20.tar.zst"
+ENV TARGET_TOOLCHAIN_SHA256="6f9a81ad467ac3b76aa726ffceabf6ab42cad0a49963b8c42e95090cf254406f"
 ENV PATH="${OSXCROSS_DIR}/bin:${LLVM_DIR}/bin:${PATH}"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${OSXCROSS_DIR}" \
