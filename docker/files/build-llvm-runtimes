@@ -17,11 +17,15 @@
 # targets build them here.
 #
 # flang reads the intrinsic modules (iso_c_binding, ieee_arithmetic, and
-# others) only from the include/flang directory next to its executable, and
-# their contents depend on the target: the x86_64 modules of the release declare
-# REAL(KIND=10), which flang rejects for aarch64. The modules are rebuilt for the
-# target in place, so an installation of LLVM compiles Fortran for one target.
-# The CUDA, PowerPC, and OpenMP modules of the release stay as they are.
+# others) from finclude/flang/<triple> of the clang resource directory when the
+# driver finds that directory for the target, and otherwise from the
+# include/flang directory next to its executable. Their contents depend on the
+# target: the x86_64 modules of the release declare REAL(KIND=10), which flang
+# rejects for aarch64. The release ships the modules of x86_64-unknown-linux-gnu
+# in finclude/flang; this script removes them and rebuilds the modules for the
+# target into include/flang, so an installation of LLVM compiles Fortran for one
+# target with one set of modules. The sources of the modules are part of
+# flang-rt (flang-rt/lib/runtime/*.f90).
 #
 # Both are static archives of position-independent code, compiled with the CPU
 # flags of TARGET_CPU_FLAGS (-march=x86-64-v2), the CPU baseline of the
@@ -132,14 +136,19 @@ INTRINSIC_MODULES=(
 
 # Rebuild the intrinsic modules for the target, without the REAL(KIND=16)
 # procedures (the -DFLANG_SUPPORT_R16 of the flang build), because flang-rt is
-# built without REAL(16) math.
+# built without REAL(16) math. The modules of the release in the resource
+# directory go first, because the driver prefers them to include/flang.
 function build_intrinsic_modules() {
   local src_dir="${1}"
   local triple="${2}"
+  local resource_dir
+  resource_dir="$("${LLVM_DIR}/bin/clang" -print-resource-dir)" || return
+  rm -rf "${resource_dir}/finclude"
+  mkdir -p "${LLVM_DIR}/include/flang"
   local module
   for module in "${INTRINSIC_MODULES[@]}"; do
     "${LLVM_DIR}/bin/flang" --target="${triple}" -cpp -fsyntax-only \
-      -module-dir "${LLVM_DIR}/include/flang" "${src_dir}/flang/module/${module}.f90"
+      -module-dir "${LLVM_DIR}/include/flang" "${src_dir}/flang-rt/lib/runtime/${module}.f90" || return
   done
 }
 
