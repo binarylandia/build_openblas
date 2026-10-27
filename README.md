@@ -15,7 +15,7 @@ Every target builds the same OpenBLAS source: develop commit `de5d4914`, the 432
 
 ## Native targets
 
-Every native target builds with clang and flang of LLVM 22.1.8 ([binarylandia/build_llvm](https://github.com/binarylandia/build_llvm), release `llvm-22.1.8-2026-10-18_10-26-24`) on the C library and system files of a target toolchain:
+Every native target builds with clang and flang of LLVM 23.1.4 ([binarylandia/build_llvm](https://github.com/binarylandia/build_llvm), release `llvm-23.1.4-2026-10-27_17-07-15`) on the C library and system files of a target toolchain:
 
 | Target | Target toolchain | Oldest system |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ The C and Fortran code and flang-rt compile for the CPU baseline of the programs
 
 OpenBLAS adds the flags of a CPU after them for the kernels of that CPU, which it selects at run time (`DYNAMIC_ARCH`). On aarch64, it also adds the `-march` of its target CPU for the rest of the code (`Makefile.arm64`): `-march=armv8-a` for `ARMV8` (Linux and Windows) and `-march=armv8.3-a` for `VORTEX` (macOS), so that code compiles for Armv8.0 without LSE on Windows and for Armv8.3 on macOS, both within the baseline.
 
-The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`), with the patches of `patches/llvm-<version>/flang-rt/`, which apply only to that LLVM version. The patches of LLVM 22.1.8 make flang-rt compile with the libstdc++ headers and the msvcrt headers of mingw-w64:
+The build image builds the Fortran runtime flang-rt for its target from the LLVM source of the same release (`docker/files/build-llvm-runtimes`), with the patches of `patches/llvm-<version>/flang-rt/`, which apply only to that LLVM version. The patches of LLVM 23.1.4 make flang-rt compile with the libstdc++ headers and the msvcrt headers of mingw-w64:
 
 - `0001-mingw-getpid.patch`: uses the `getpid` of `process.h`, which the libstdc++ headers include through `pthread.h` of winpthreads, in place of the `getpid` that flang-rt defines for Windows with another return type
 - `0002-msvcrt-system-clock.patch`: `SYSTEM_CLOCK` reads the UTC time with `GetSystemTimeAsFileTime` where the C runtime has no `timespec_get` with `TIME_UTC`, as msvcrt

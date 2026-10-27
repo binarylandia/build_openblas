@@ -38,13 +38,13 @@ ENV CCACHE_MAXSIZE="50G"
 
 # clang, flang, ld64.lld, and the LLVM binary tools. The Fortran runtime of the
 # target is built below from the LLVM source of this release.
-ENV LLVM_RELEASE="llvm-22.1.8-2026-10-18_10-26-24"
-ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"
-ENV LLVM_SOURCE_SHA256="922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888"
+ENV LLVM_RELEASE="llvm-23.1.4-2026-10-27_17-07-15"
+ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/llvm-project-23.1.4.src.tar.xz"
+ENV LLVM_SOURCE_SHA256="819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2"
 ENV LLVM_DIR="/opt/llvm"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${LLVM_DIR}" \
-&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "c80ac102a9b833ccc3de6e838fba592f76334bda8b57b6629f853d8d2a84bae8" /tmp/download \
+&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "f573259228dd5735461eb6e8dd466e535e23e0488848e1b89410dbbc85bddee9" /tmp/download \
 && zstd -dc /tmp/download | tar -C "${LLVM_DIR}" -x \
 && rm /tmp/download \
 && "${LLVM_DIR}/bin/clang" --version \
@@ -90,7 +90,7 @@ RUN set -euxo pipefail >/dev/null \
 && fetch "${LLVM_SOURCE}" "${LLVM_SOURCE_SHA256}" "/tmp/${LLVM_SOURCE##*/}" \
 && build-llvm-runtimes "/tmp/${LLVM_SOURCE##*/}" "${TRIPLET}" \
 && rm "/tmp/${LLVM_SOURCE##*/}" \
-&& ls "${LLVM_DIR}/lib/clang/22/lib/darwin/libflang_rt.runtime.a" "${LLVM_DIR}/lib/clang/22/lib/darwin/libclang_rt.osx.a"
+&& ls "${LLVM_DIR}/lib/clang/23/lib/darwin/libflang_rt.runtime.a" "${LLVM_DIR}/lib/clang/23/lib/darwin/libclang_rt.osx.a"
 
 ENV HOSTCC="${LLVM_DIR}/bin/clang --no-default-config"
 ENV CC="${OSXCROSS_DIR}/bin/${TRIPLET}-clang"

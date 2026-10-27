@@ -33,7 +33,7 @@
 # share/flang-rt/build.json of LLVM_DIR records the C++ compiler of the flang-rt
 # build, its flags, and the CPU flags among them:
 #
-#   {"compiler": "clang version 22.1.8 (...)", "cflags": "-march=x86-64-v2 -O3 -DNDEBUG", "cpu_flags": "-march=x86-64-v2"}
+#   {"compiler": "clang version 23.1.4 (...)", "cflags": "-march=x86-64-v2 -O3 -DNDEBUG", "cpu_flags": "-march=x86-64-v2"}
 #
 # The compilers are clang, clang++, and flang of LLVM_DIR (default /opt/llvm)
 # with --target=<triple>, which load the configuration files <triple>.cfg or
@@ -51,9 +51,9 @@
 # such a directory builds the unchanged source.
 #
 # Examples:
-#   $0 /tmp/llvm-project-22.1.8.src.tar.xz aarch64-unknown-linux-gnu
-#   $0 /tmp/llvm-project-22.1.8.src.tar.xz arm64-apple-darwin20.2
-#   $0 /tmp/llvm-project-22.1.8.src.tar.xz x86_64-w64-mingw32
+#   $0 /tmp/llvm-project-23.1.4.src.tar.xz aarch64-unknown-linux-gnu
+#   $0 /tmp/llvm-project-23.1.4.src.tar.xz arm64-apple-darwin20.2
+#   $0 /tmp/llvm-project-23.1.4.src.tar.xz x86_64-w64-mingw32
 #
 set -euo pipefail
 trap "exit" INT
@@ -80,8 +80,8 @@ function extract_source() {
   tar -xJf "${tarball}" -C "${src_dir}" --strip-components=1 "${parts[@]}"
 }
 
-# Print the LLVM version of a source tarball: 22.1.8 for
-# llvm-project-22.1.8.src.tar.xz.
+# Print the LLVM version of a source tarball: 23.1.4 for
+# llvm-project-23.1.4.src.tar.xz.
 function source_version() {
   local name
   name="$(basename "${1}")"

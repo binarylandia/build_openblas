@@ -38,13 +38,13 @@ ENV CCACHE_MAXSIZE="50G"
 
 # clang, flang, lld, and the LLVM binary tools. The Fortran runtime of the
 # target is built below from the LLVM source of this release.
-ENV LLVM_RELEASE="llvm-22.1.8-2026-10-18_10-26-24"
-ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"
-ENV LLVM_SOURCE_SHA256="922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888"
+ENV LLVM_RELEASE="llvm-23.1.4-2026-10-27_17-07-15"
+ENV LLVM_SOURCE="https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/llvm-project-23.1.4.src.tar.xz"
+ENV LLVM_SOURCE_SHA256="819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2"
 ENV LLVM_DIR="/opt/llvm"
 RUN set -euxo pipefail >/dev/null \
 && mkdir -p "${LLVM_DIR}" \
-&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "c80ac102a9b833ccc3de6e838fba592f76334bda8b57b6629f853d8d2a84bae8" /tmp/download \
+&& fetch "https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/${LLVM_RELEASE}.tar.zst" "f573259228dd5735461eb6e8dd466e535e23e0488848e1b89410dbbc85bddee9" /tmp/download \
 && zstd -dc /tmp/download | tar -C "${LLVM_DIR}" -x \
 && rm /tmp/download \
 && "${LLVM_DIR}/bin/clang" --version \
@@ -55,13 +55,13 @@ RUN set -euxo pipefail >/dev/null \
 # bin directory of LLVM (sysroot, compiler-rt, libc++, libunwind, lld). The
 # archive unpacks into the LLVM installation of the same release.
 ENV TRIPLET="aarch64-w64-mingw32"
-ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/llvm-mingw-22.1.8-2026-10-18_10-26-24.tar.zst"
-ENV TARGET_TOOLCHAIN_SHA256="4cd60450e4dc43766e1302cd4c2beb345ace65f36d7204b0aac068d744778e85"
+ENV TARGET_TOOLCHAIN_URL="https://github.com/binarylandia/build_llvm/releases/download/${LLVM_RELEASE}/llvm-mingw-23.1.4-2026-10-27_17-07-15.tar.zst"
+ENV TARGET_TOOLCHAIN_SHA256="31d696d1ca5b8ebb3bd697cda985b0abc15375c5af35ad8d198d13fb0ba3d956"
 RUN set -euxo pipefail >/dev/null \
 && fetch "${TARGET_TOOLCHAIN_URL}" "${TARGET_TOOLCHAIN_SHA256}" /tmp/download \
 && zstd -dc /tmp/download | tar -C "${LLVM_DIR}" -x \
 && rm /tmp/download \
-&& ls "${LLVM_DIR}/lib/clang/22/lib/windows/libclang_rt.builtins-aarch64.a" \
+&& ls "${LLVM_DIR}/lib/clang/23/lib/windows/libclang_rt.builtins-aarch64.a" \
 && "${LLVM_DIR}/bin/${TRIPLET}-clang" --version
 
 # The CPU baseline of the programs that link the archives: Armv8.0 with the LSE
@@ -86,7 +86,7 @@ RUN set -euxo pipefail >/dev/null \
 && fetch "${LLVM_SOURCE}" "${LLVM_SOURCE_SHA256}" "/tmp/${LLVM_SOURCE##*/}" \
 && build-llvm-runtimes "/tmp/${LLVM_SOURCE##*/}" "${TRIPLET}" \
 && rm "/tmp/${LLVM_SOURCE##*/}" \
-&& ls "${LLVM_DIR}/lib/clang/22/lib/aarch64-w64-windows-gnu/libflang_rt.runtime.a"
+&& ls "${LLVM_DIR}/lib/clang/23/lib/aarch64-w64-windows-gnu/libflang_rt.runtime.a"
 
 ENV HOSTCC="${LLVM_DIR}/bin/clang --no-default-config"
 ENV CC="${LLVM_DIR}/bin/${TRIPLET}-clang"
