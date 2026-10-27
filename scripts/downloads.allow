@@ -1,0 +1,5 @@
+# Files that download, each verifying what it downloads (see scripts/check-downloads)
+docker/files/fetch                       verifies each download against the sha256 that the caller passes
+scripts/lib.sh                           verifies the OpenBLAS source against its sha256
+dev/wasm32-unknown-emscripten.dockerfile verifies Node and Emscripten against NODE_SHA256 and EMSCRIPTEN_SHA256
+scripts/release                          fetches the refs of origin to check that the commit is pushed

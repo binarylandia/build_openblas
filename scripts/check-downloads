@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Usage: $0
+#
+# Fail when a tracked file of this repository downloads with curl, wget, or
+# aria2c, or fetches with git, and is not an approved download site of
+# downloads.allow next to this script. An approved file verifies everything it
+# downloads, by sha256 or by a full commit hash, so that the build does not rest
+# on TLS alone: a certificate authority that issues a certificate for the wrong
+# host, as the compromised eMudhra intermediate CAs of October 2026 could, then
+# cannot change what the build runs.
+#
+# downloads.allow lists one approved file per line, as a path relative to the
+# root of the repository followed by the reason; # starts a comment. The check
+# also fails for a listed file that does not exist or downloads nothing, so that
+# the list stays current.
+#
+set -euo pipefail
+trap "exit" INT
+
+THIS_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+
+# Commands that download, outside of comments; a package name in an apt list
+# (curl \) is no command.
+DOWNLOAD_PATTERN='^[^#]*(\b(curl|wget|aria2c)\s+[^\\[:space:]]|\bgit\b[^|;&]*\s(clone|fetch)\b)'
+
+# Print the tracked files that can run commands: scripts and Dockerfiles, not
+# documentation, configs, patches, or sources.
+function tracked_files() {
+  local root="${1}"
+  git -C "${root}" ls-files -- \
+    ':!:*.md' ':!:*.config' ':!:*.patch' ':!:*.c' ':!:*.h' ':!:*.cpp' ':!:*.html' \
+    ':!:*.txt' ':!:*.json' ':!:*.toml' ':!:*.conf' ':!:*.sha256' ':!:*/checksums' ':!:ChangeLog' \
+    ':!:*downloads.allow'
+}
+
+main() {
+  show_help() {
+    sed -n '2,${/^#/!q; s/^# \?//p}' "${BASH_SOURCE[0]}" | sed "s|\$0|${0##*/}|g"
+  }
+  [[ "${1:-}" =~ ^(-h|--help)$ ]] && {
+    show_help
+    exit 0
+  }
+
+  local root
+  root="$(git -C "${THIS_DIR}" rev-parse --show-toplevel)"
+  local allow_file="${THIS_DIR}/downloads.allow"
+  local -A allowed=()
+  local path
+  while read -r path _; do
+    allowed["${path}"]=1
+  done < <(grep -vE '^\s*(#|$)' "${allow_file}")
+
+  local failed=0
+  local -A downloading=()
+  local files=()
+  mapfile -t files < <(tracked_files "${root}")
+  local file line
+  for file in "${files[@]}"; do
+    [[ -f "${root}/${file}" ]] || continue
+    while IFS= read -r line; do
+      downloading["${file}"]=1
+      if [[ -z "${allowed[${file}]:-}" ]]; then
+        printf '%s:%s\n' "${file}" "${line}" >&2
+        failed=1
+      fi
+    done < <(grep -nE "${DOWNLOAD_PATTERN}" "${root}/${file}" || true) # grep finds no download in most files
+  done
+
+  for path in "${!allowed[@]}"; do
+    if [[ -z "${downloading[${path}]:-}" ]]; then
+      printf '%s: listed in %s, but downloads nothing or does not exist\n' "${path}" "${allow_file}" >&2
+      failed=1
+    fi
+  done
+
+  if ((failed)); then
+    printf 'Download without a verified checksum or commit, see %s\n' "${BASH_SOURCE[0]}" >&2
+    exit 1
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
