@@ -479,8 +479,14 @@ function build_variant() {
   fi
 
   # The library targets only: the default target also links the test programs,
-  # which the tests below link with the link flags of the target.
-  ${NICE} make -C "${src_dir}" -s libs netlib re_lapack "${make_vars[@]}" 2>&1 | log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
+  # which the tests below link with the link flags of the target. One make per
+  # target: the parallel jobs of OpenBLAS (-j of Makefile.conf) would run the
+  # targets at the same time, and their concurrent `ar -ru` into libopenblas.a
+  # lose members, such as all kernels of one core.
+  local goal
+  for goal in libs netlib re_lapack; do
+    ${NICE} make -C "${src_dir}" -s "${goal}" "${make_vars[@]}" 2>&1 | log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
+  done
   ${NICE} make -C "${src_dir}" -s install PREFIX="${install_dir}" "${make_vars[@]}" 2>&1 | log "${build_log}" | "${BASH_SOURCE%/*}/no_noise"
 
   install -m 0644 "${flang_rt}" "${install_dir}/lib/libflang_rt.runtime.a"
