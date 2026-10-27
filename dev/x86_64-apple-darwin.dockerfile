@@ -11,6 +11,7 @@ RUN set -euxo pipefail >/dev/null \
   bash \
   ca-certificates \
   ccache \
+  cmake \
   curl \
   g++ \
   gcc \
@@ -20,6 +21,7 @@ RUN set -euxo pipefail >/dev/null \
   parallel \
   patch \
   pkg-config \
+  python3 \
   sudo \
   tar \
   xz-utils \
