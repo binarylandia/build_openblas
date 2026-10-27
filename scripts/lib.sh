@@ -30,7 +30,8 @@ function abspath() {
 }
 
 function log() {
-  tee -a "${1}" | stdbuf -oL grep --color=always -iE "error|fail|cannot|can't|unable|"
+  # grep exits 1 when the command prints nothing, which is no failure.
+  tee -a "${1}" | { stdbuf -oL grep --color=always -iE "error|fail|cannot|can't|unable|" || (($? == 1)); }
 }
 
 # Write a directory as an xz-compressed tar archive. The entries are sorted,
