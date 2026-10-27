@@ -1,56 +1,42 @@
-FROM quay.io/pypa/manylinux2014_x86_64:2024.10.19-1@sha256:2d03fb51340fbbc5732c7251eedc2ac015c96a16ed91f818ea500e5b2099da96
+FROM debian:13.7-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
 SHELL ["bash", "-euxo", "pipefail", "-c"]
 
 COPY docker/files/fetch /usr/local/bin/fetch
 
 RUN set -euxo pipefail >/dev/null \
-&& sed -i "s/enabled=1/enabled=0/g" "/etc/yum/pluginconf.d/fastestmirror.conf" \
-&& sed -i "s/enabled=1/enabled=0/g" "/etc/yum/pluginconf.d/ovl.conf" \
-&& yum clean all >/dev/null \
-&& yum install -y epel-release >/dev/null \
-&& yum remove -y \
-  clang* \
-  devtoolset* \
-  gcc* \
-  llvm-toolset* \
->/dev/null \
-&& yum install -y \
+&& export DEBIAN_FRONTEND=noninteractive \
+&& apt-get update -qq \
+&& apt-get install --no-install-recommends --yes -qq \
   bash \
   ca-certificates \
+  ccache \
   curl \
+  g++ \
+  gcc \
   git \
   jq \
   make \
   parallel \
   patch \
-  pkgconfig \
+  pkg-config \
   sudo \
   tar \
-  xz \
+  wine \
+  wine64 \
+  xz-utils \
   zstd \
 >/dev/null \
-&& yum clean all >/dev/null \
-&& rm -rf /var/cache/yum
+&& apt-get clean autoclean >/dev/null \
+&& apt-get autoremove --yes >/dev/null \
+&& rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+COPY --link "docker/files/distrust-compromised-roots" "/"
+RUN /distrust-compromised-roots
 
 ENV CCACHE_DIR="/cache/ccache"
 ENV CCACHE_NOCOMPRESS="1"
 ENV CCACHE_MAXSIZE="50G"
-RUN set -euxo pipefail >/dev/null \
-&& fetch "https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz" "80cab87bd510eca796467aee8e663c398239e0df1c4800a0b5dff11dca0b4f18" /tmp/download \
-&& tar --strip-components=1 -C "/usr/bin" -xJf /tmp/download "ccache-4.10.2-linux-x86_64/ccache" \
-&& rm /tmp/download \
-&& which ccache \
-&& ccache --version
-
-RUN set -euxo pipefail >/dev/null \
-&& fetch "https://github.com/binarylandia/build_gcc/releases/download/2024-11-03_12-57-14/gcc-14.2.0-host-x86_64-unknown-linux-gnu.2.17-2024-11-03_12-57-14.tar.xz" "7695cb4c68fa2e703bca4d0e5ea7bce3f6fc8ac2db507279d02818e3bd704bcc" /tmp/download \
-&& tar -C "/usr" -xJf /tmp/download \
-&& rm /tmp/download \
-&& ls /usr/bin/gcc \
-&& gcc -v \
-&& ls /usr/bin/gcc-ar \
-&& gcc-ar --version
 
 # clang, flang, lld, and the LLVM binary tools. The Fortran runtime of the
 # target is built below from the LLVM source of this release.
@@ -65,14 +51,6 @@ RUN set -euxo pipefail >/dev/null \
 && rm /tmp/download \
 && "${LLVM_DIR}/bin/clang" --version \
 && "${LLVM_DIR}/bin/flang" --version
-
-# Wine runs the check programs and the OpenBLAS tests of the target, in the
-# prefix ~/.wine, which it creates on the first run.
-RUN set -euxo pipefail >/dev/null \
-&& yum install -y wine-core >/dev/null \
-&& yum clean all >/dev/null \
-&& rm -rf /var/cache/yum \
-&& wine64 --version
 
 # llvm-mingw: the static UCRT sysroot of the target, compiler-rt, and the
 # <triple>-clang wrappers, which load the configuration <triple>.cfg from the
@@ -129,7 +107,7 @@ ENV STRINGS="${LLVM_DIR}/bin/llvm-strings"
 ENV STRIP="${LLVM_DIR}/bin/llvm-strip"
 ENV WINEDEBUG="-all"
 ENV WINEDLLOVERRIDES="mscoree=;mshtml="
-ENV TARGET_RUNNER="wine64"
+ENV TARGET_RUNNER="wine"
 
 
 ARG USER=user

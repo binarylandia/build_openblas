@@ -4,7 +4,7 @@
 # Build image of the wasm32-unknown-emscripten target. Emscripten compiles
 # OpenBLAS, a native GCC compiles the helper programs that the OpenBLAS build
 # runs on the build machine, and Node runs emcc and the link checks.
-FROM debian:12.14-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+FROM debian:13.7-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
 SHELL ["bash", "-euxo", "pipefail", "-c"]
 
@@ -30,8 +30,11 @@ RUN set -euxo pipefail >/dev/null \
 && apt-get autoremove --yes >/dev/null \
 && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
-ARG NODE_VERSION="24.21.0"
-ARG NODE_SHA256="fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+COPY --link "docker/files/distrust-compromised-roots" "/"
+RUN /distrust-compromised-roots
+
+ARG NODE_VERSION="24.22.1"
+ARG NODE_SHA256="6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6"
 ARG NODE_DIR="/opt/node"
 RUN set -euxo pipefail >/dev/null \
 && curl -fsSLo "/tmp/node.tar.xz" "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
@@ -42,9 +45,9 @@ RUN set -euxo pipefail >/dev/null \
 && ln -s "${NODE_DIR}/bin/node" "/usr/local/bin/node" \
 && node --version
 
-ARG EMSCRIPTEN_VERSION="6.0.10"
-ARG EMSCRIPTEN_BUILD="666337b525e673e769121856d175f6f52b8ead64"
-ARG EMSCRIPTEN_SHA256="a51dd2829bdf725d268974728e032533b106ea01cb482a62288ec12627a7abbe"
+ARG EMSCRIPTEN_VERSION="6.0.13"
+ARG EMSCRIPTEN_BUILD="eb132757325583b787fe9414b09afea9442b72ad"
+ARG EMSCRIPTEN_SHA256="cda6801012ff3319a539111826ed02a9abd7eff135c2ef261c8941caf5a3763e"
 ARG EMSCRIPTEN_DIR="/opt/emscripten"
 
 # Emscripten: the archive that `emsdk install <version>` downloads; the build id

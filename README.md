@@ -89,7 +89,7 @@ The `wasm32-unknown-emscripten` target builds OpenBLAS with `emcc` for `TARGET=W
 - **plain**: Single-threaded
 - **mt**: For modules with threads (`-pthread`). Every object is compiled with atomics, which `wasm-ld` requires for shared memory, and `USE_LOCKING=1` locks the work buffers, so threads can call BLAS at the same time. OpenBLAS's own thread pool stays off
 
-Emscripten has no ABI guarantee between versions, so an archive links only with the Emscripten version that built it. The version is part of the file name (`wasm32-unknown-emscripten.6.0.10`) and is stored in `share/openblas/emscripten-version.txt`.
+Emscripten has no ABI guarantee between versions, so an archive links only with the Emscripten version that built it. The version is part of the file name (`wasm32-unknown-emscripten.6.0.13`) and is stored in `share/openblas/emscripten-version.txt`.
 
 The WebAssembly archives have the same relocatable pkg-config file, without the Fortran runtime.
 
@@ -114,7 +114,7 @@ CROSS_TARGET=wasm32-unknown-emscripten ./build
 ```
 
 - Native archives become release `openblas-<version>-<build time>`, WebAssembly archives `openblas-<version>-emscripten-<Emscripten version>-<build time>`
-- The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The distribution packages of the images (yum, apt) come from their mirrors and are not pinned
+- The base images are pinned by digest, and the OpenBLAS source and every download of the build images by sha256. The Debian packages of the images come from the Debian mirrors, signed by the Debian archive keys, and are not pinned. The images trust neither emSign ECC Root CA - G3 nor AAA Certificate Services, the roots above the eMudhra intermediate CAs whose private keys became public in October 2026
 - Archives list their files in sorted order with one owner and the commit time, so the same files give the same archive
 - `scripts/release` publishes only a build of a clean, pushed commit, and never changes a published release
 - Each release has `SHA256SUMS` and `manifest.json`, which holds the build record of every archive. Each archive also holds its own record as `share/build_openblas/build.json`, so an unpacked archive names the toolchain that built it:
