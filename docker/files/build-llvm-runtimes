@@ -67,7 +67,7 @@ TARGET_CPU_FLAGS="${TARGET_CPU_FLAGS:?TARGET_CPU_FLAGS names the CPU flags of th
 PATCHES_DIR="${PATCHES_DIR:-/usr/local/share/build-llvm-runtimes/patches}"
 
 # The parts of the LLVM source tree that the runtimes build reads.
-SOURCE_PARTS=(cmake runtimes llvm/cmake llvm/utils/llvm-lit third-party compiler-rt flang flang-rt)
+SOURCE_PARTS=(cmake runtimes llvm/cmake llvm/utils/llvm-lit third-party compiler-rt flang flang-rt libc/shared)
 
 function extract_source() {
   local tarball="${1}"
