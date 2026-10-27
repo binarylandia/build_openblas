@@ -1,0 +1,36 @@
+flang-rt: use the getpid of process.h when MinGW headers declare it
+
+The libstdc++ headers of MinGW GCC include pthread.h of winpthreads, which
+includes process.h. process.h declares int getpid(void) and defines
+_CRT_GETPID_DEFINED, and the pid_t getpid() that command.cpp defines for Windows
+then differs only in its return type, which fails to compile. Without the
+macro, as with libc++, the source compiles unchanged. Both return the ID of the
+current process.
+
+#line restores the line numbers of the unpatched source after the change, so
+the line numbers in runtime error messages, and with them the objects of every
+other target, stay the same.
+
+--- a/flang-rt/lib/runtime/command.cpp
++++ b/flang-rt/lib/runtime/command.cpp
+@@ -25,7 +25,11 @@
+ 
+ // On Windows GetCurrentProcessId returns a DWORD aka uint32_t
+ #include <processthreadsapi.h>
++// process.h declares int getpid(void) and defines _CRT_GETPID_DEFINED when the
++// libstdc++ headers of MinGW GCC include it through pthread.h of winpthreads.
++#ifndef _CRT_GETPID_DEFINED
+ inline pid_t getpid() { return GetCurrentProcessId(); }
++#endif
+ #else
+ #include <unistd.h> //getpid() unlink()
+ 
+@@ -33,6 +37,8 @@
+ #define PATH_MAX 4096
+ #endif
+ #endif
++// The line numbers of the unpatched source, which runtime error messages name.
++#line 36
+ 
+ namespace Fortran::runtime {
+ std::int32_t RTNAME(ArgumentCount)() {
